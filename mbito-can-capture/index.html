@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#080d12" />
+  <meta name="description" content="MBito CAN Capture: captură pasivă, decodificare cadre CAN și export prin BLE cu Bluefy." />
+  <title>MBito CAN Capture</title>
+  <style>
+    :root { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color-scheme:dark; color:#f5f7fa; background:#080d12; --card:#121a23; --border:#273440; --muted:#97a7b8; --mint:#b4fb75; --blue:#7bd9ef; --yellow:#ffd182; --red:#ff9b9e; }
+    * { box-sizing: border-box; }
+    body { min-height:100dvh; margin:0; background:radial-gradient(ellipse 90% 30% at 50% -8%,#24504355,transparent),#080d12; }
+    .app { max-width:820px; margin:auto; padding: max(24px,env(safe-area-inset-top)) 16px calc(42px + env(safe-area-inset-bottom)); }
+    header { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:24px; }
+    .brand { display:flex; gap:12px; align-items:center; }
+    .logo { display:grid; place-items:center; background:#b4fb75; color:#0f1c12; width:43px; height:43px; border-radius:14px; font-weight:900; font-size:23px; }
+    .eyebrow { font-size:11px; font-weight:800; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); }
+    h1 { font-size:20px; line-height:1.25; margin:3px 0 0; letter-spacing:-.03em; }
+    h2 { font-size:17px; letter-spacing:-.015em; margin:0; }
+    .badge { padding:8px 10px; border:1px solid var(--border); border-radius:999px; color:var(--muted); font-size:11px; white-space:nowrap; font-weight:800; }
+    .badge.ok { border-color:#2f5840; background:#173021; color:var(--mint); }
+    .badge.busy { border-color:#5f5033; background:#342a17; color:var(--yellow); }
+    .card { border:1px solid var(--border); background:linear-gradient(155deg,#141f29,#101820); border-radius:19px; padding:19px; margin-bottom:14px; box-shadow:0 10px 30px #0002; }
+    .between { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .sub { color:var(--muted); font-size:13px; line-height:1.55; margin:10px 0 0; }
+    .row { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-top:17px; }
+    button,select,input { font:inherit; }
+    button { min-height:46px; padding:12px 16px; border:1px solid var(--border); border-radius:12px; color:#f5f7fa; background:#1b2732; font-weight:800; cursor:pointer; touch-action:manipulation; }
+    button:disabled { opacity:.35; cursor:not-allowed; }
+    button:focus-visible,select:focus-visible,input:focus-visible { outline:2px solid var(--blue); outline-offset:3px; }
+    button.primary { color:#12221a; border-color:var(--mint); background:var(--mint); }
+    button.stop { color:#ffe0db; border-color:#8b5756; background:#4a2729; }
+    button.ghost { background:transparent; }
+    .row > button { flex:1 1 auto; }
+    .info { background:#1b292f; border:1px solid #315361; border-radius:13px; margin-top:15px; padding:12px 13px; color:#c9f1fa; font-size:13px; line-height:1.5; }
+    .info.warn { background:#33291b; border-color:#78542c; color:#ffdb99; }
+    .info.error { background:#3f2226; border-color:#8a454c; color:#ffb0b4; }
+    .metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:16px; }
+    .metric { background:#091119; border:1px solid #1c2a35; border-radius:12px; padding:12px 10px; }
+    .metric strong { display:block; font-family:ui-monospace, Menlo, Consolas, monospace; font-size:20px; margin-top:6px; color:#f8fbfd; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+    .metric small { font-size:10px; font-weight:700; color:var(--muted); letter-spacing:.06em; }
+    .segment { display:flex; flex-wrap:wrap; align-items:center; gap:9px; margin-top:12px; }
+    .segment label { color:var(--muted); font-size:12px; font-weight:700; }
+    select,input { min-height:42px; border:1px solid var(--border); background:#0a121a; color:#eaf1f6; border-radius:10px; padding:9px; }
+    select { flex:1 1 160px; }
+    input[type=search] { width:100%; margin-top:14px; }
+    .line { height:1px; background:var(--border); margin:19px 0; }
+    .tablewrap { overflow:auto; max-height:390px; overscroll-behavior:contain; border-radius:10px; }
+    table { width:100%; border-collapse:collapse; font-size:12px; font-family:ui-monospace, Menlo, Consolas, monospace; white-space:nowrap; }
+    thead { position:sticky; top:0; background:#1d2c37; z-index:1; }
+    td,th { padding:10px 8px; border-bottom:1px solid #26333d; text-align:left; }
+    th { color:var(--muted); font-weight:800; }
+    td code { color:var(--blue); }
+    .muted { color:var(--muted); }
+    .log { margin-top:10px; height:140px; overflow:auto; padding:10px; border:1px solid var(--border); background:#070e15; border-radius:10px; font-size:11px; line-height:1.7; font-family:ui-monospace, Menlo, Consolas, monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .green { color:var(--mint); } .amber { color:var(--yellow); } .red { color:var(--red); }
+    .notes { margin:18px 3px 0; font-size:12px; line-height:1.6; color:var(--muted); }
+    .pill { color:var(--blue); font-weight:700; }
+    [hidden] { display:none !important; }
+    @media(max-width:450px){.metrics{gap:6px}.metric{padding:11px 7px}.metric strong{font-size:17px} header{margin-bottom:19px}.card{padding:16px}.row>button{flex-basis:calc(50% - 10px)} }
+  </style>
+</head>
+<body>
+<main class="app">
+  <header>
+    <div class="brand"><div class="logo">M</div><div><div class="eyebrow">W176 · CAN ANALYZER</div><h1>MBito CAN Capture</h1></div></div>
+    <span id="badge" class="badge">DECONECTAT</span>
+  </header>
+
+  <section class="card">
+    <div class="between"><h2>01. Conexiune Bluetooth</h2><span class="eyebrow">FFF0 / FFF1 / FFF2</span></div>
+    <p class="sub">Deschide această pagină în <b>Bluefy</b> pe iPhone. Se conectează direct la firmware-ul tău <b>MBito-Sniffer</b>. Nu mai ai nevoie de nRF Connect.</p>
+    <div class="row"><button id="connect" class="primary">CONECTEAZĂ DONGLE</button><button id="disconnect" class="ghost" disabled>DECONECTEAZĂ</button></div>
+    <div id="message" class="info" role="status">Aștept conexiunea. Folosește Bluefy, nu Safari.</div>
+  </section>
+
+  <section class="card">
+    <div class="between"><h2>02. Captură CAN</h2><span class="eyebrow" id="phase">READY</span></div>
+    <div class="metrics">
+      <div class="metric"><small>CADRE ÎN BUFFER</small><strong id="frames">0</strong></div>
+      <div class="metric"><small>SUPRASCRISE</small><strong id="overwritten">0</strong></div>
+      <div class="metric"><small>TIMP CAPTURĂ</small><strong id="elapsed">0.0 s</strong></div>
+    </div>
+    <div class="segment"><label for="duration">Durată automată</label><select id="duration"><option value="1">1 secundă (recomandat motor pornit)</option><option value="2">2 secunde</option><option value="5">5 secunde</option><option value="10">10 secunde</option><option value="25">25 secunde (poate suprascrie date)</option><option value="0">Manual</option></select></div>
+    <div class="row"><button id="start" class="primary" disabled>● START</button><button id="stop" class="stop" disabled>■ STOP + DESCARCĂ</button><button id="status" disabled>STATUS</button></div>
+    <div class="row"><button id="mark" disabled>◆ MARCHEAZĂ UNLOCK</button><button id="dump" disabled>↧ DESCARCĂ DIN DONGLE</button></div>
+    <div class="info warn">Firmware-ul actual poate păstra doar <b>4096 cadre</b>. Dacă traficul depășește capacitatea, pierdem începutul capturii. Aplicația afișează pierderile, nu pretinde că le-a salvat. Pentru animația completă de ~25 s va trebui îmbunătățit firmware-ul.</div>
+    <div class="metrics">
+      <div class="metric"><small>CADRE DESCĂRCATE</small><strong id="received">0</strong></div>
+      <div class="metric"><small>AȘTEPTATE DUMP</small><strong id="expected">—</strong></div>
+      <div class="metric"><small>PAȘI PIERDUȚI</small><strong id="missing">—</strong></div>
+    </div>
+    <div id="dumpnote" class="sub">Datele sunt transmise prin BLE doar la DUMP, după oprirea capturii.</div>
+  </section>
+
+  <section class="card">
+    <div class="between"><h2>03. Cadre CAN</h2><span id="listed" class="eyebrow">0 cadre</span></div>
+    <input type="search" id="filter" placeholder="Filtrează după CAN ID sau date hex, ex. 622" spellcheck="false" />
+    <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>#</th><th>TIMP</th><th>CAN ID</th><th>DLC</th><th>DATE HEX</th></tr></thead><tbody id="tbody"><tr><td colspan="5" class="muted">Nicio captură descărcată.</td></tr></tbody></table></div>
+    <div class="row"><button id="csv" disabled>EXPORT CSV</button><button id="json" disabled>EXPORT JSON</button><button id="clear" class="ghost" disabled>ȘTERGE SESIUNEA</button></div>
+    <p class="sub">Exportul este local, direct pe telefon. În JSON sunt păstrate și marcajele, contoarele și timpii.</p>
+  </section>
+
+  <section class="card"><div class="between"><h2>Jurnal conexiune</h2><span class="eyebrow">BLE · local</span></div><div class="log" id="log" aria-live="polite"></div></section>
+  <p class="notes">Doar monitorizare: firmware-ul folosește CAN <span class="pill">LISTEN ONLY</span>. Aplicația trimite doar comenzi GATT de control către dongle, nu transmite cadre CAN în mașină. Ține mașina staționată la testare. Pentru a înregistra animația completă fără pierderi, actualizarea firmware-ului este necesară.</p>
+</main>
+<script>
+'use strict';
+const SERVICE=0xFFF0, CONTROL=0xFFF1, DATA=0xFFF2, MAX_FRAMES=4096;
+const $=id=>document.getElementById(id);
+let gattQueue=Promise.resolve();
+function gattExclusive(fn){const p=gattQueue.then(fn);gattQueue=p.catch(()=>{});return p;}
+const state={device:null,control:null,data:null,connected:false,capturing:false,dumping:false,frames:[],status:{capturing:false,count:0,overwritten:0,dumping:false},timer:null,ticker:null,poller:null,startedAt:null,startedPerf:0,stoppedAt:null,markers:[],expected:null,endReceived:false,lostConnections:0,notificationErrors:0,downloadNotified:0,sequenceGaps:0,dumpOverwritten:null};
+function log(s){const node=$('log');node.textContent+=`[${new Date().toLocaleTimeString('ro-RO')}] ${s}\n`;node.scrollTop=node.scrollHeight;const lines=node.textContent.split('\n');if(lines.length>170)node.textContent=lines.slice(-120).join('\n');}
+function info(s,kind='normal'){const e=$('message');e.textContent=s;e.className='info'+(kind==='error'?' error':kind==='warn'?' warn':'');log(s);}
+function u32(b,i){return (b[i]|(b[i+1]<<8)|(b[i+2]<<16)|(b[i+3]<<24))>>>0;}
+function hexByte(n){return n.toString(16).toUpperCase().padStart(2,'0');}
+function hexId(n){return n.toString(16).toUpperCase().padStart(n>0x7ff?8:3,'0');}
+function fmt(n){return n.toLocaleString('ro-RO');}
+function parsedStatus(b){if(b.length<11)throw Error('Status incomplet: '+b.length+' octeți');return {capturing:b[1]!==0,count:u32(b,2),overwritten:u32(b,6),dumping:b[10]!==0};}
+function parsedFrame(b){if(b.length!==20)throw Error('Cadru A1 invalid: '+b.length+' octeți');const dlc=b[10];if(dlc>8)throw Error('DLC invalid: '+dlc);return {timestampMs:u32(b,2),id:u32(b,6),extended:!!(b[1]&1),rtr:!!(b[1]&2),dlc,data:Array.from(b.slice(11,11+dlc)),seq8:b[19]};}
+function setText(id,s){$(id).textContent=s;}
+function hasData(){return state.frames.length>0;}
+function update(){
+  $('badge').textContent=state.connected?'CONECTAT':'DECONECTAT';$('badge').className='badge'+(state.connected?' ok':'');
+  $('connect').disabled=state.connected;$('disconnect').disabled=!state.connected;
+  $('start').disabled=!state.connected||state.capturing||state.dumping;
+  $('stop').disabled=!state.connected||!state.capturing;
+  $('mark').disabled=!state.capturing;
+  $('dump').disabled=!state.connected||state.capturing||state.dumping;
+  $('status').disabled=!state.connected||state.dumping;
+  $('csv').disabled=!hasData();$('json').disabled=!hasData();$('clear').disabled=state.capturing||state.dumping||(!hasData()&&!state.markers.length);
+  setText('phase',state.dumping?'DUMP':state.capturing?'RECORDING':'READY');
+  setText('frames',fmt(state.status.count));setText('overwritten',fmt(state.status.overwritten));
+  setText('received',fmt(state.frames.length));setText('expected',state.expected===null?'—':fmt(state.expected));
+  setText('missing',state.expected===null?'—':fmt(Math.max(0,state.expected-state.frames.length)));
+  const seconds=state.startedAt===null?0:((state.stoppedAt===null?performance.now():state.stoppedAt)-state.startedPerf)/1000;
+  setText('elapsed',`${Math.max(0,seconds).toFixed(1)} s`);
+  $('dumpnote').textContent=state.dumping?`Se descarcă: ${fmt(state.frames.length)} cadre... Nu închide Bluefy.`:state.endReceived?`DUMP complet: ${fmt(state.frames.length)}/${fmt(state.expected??0)} cadre. ${state.dumpOverwritten?'DATE SUPRASCRISE ÎN BUFFER.':''}`:'Datele sosesc prin BLE la descărcare, nu în timpul capturii.';
+}
+function stopTimers(){clearTimeout(state.timer);state.timer=null;clearInterval(state.ticker);state.ticker=null;clearInterval(state.poller);state.poller=null;}
+function onDisconnect(){if(!state.connected&&!state.control&&!state.data)return;state.connected=false;state.control=null;state.data=null;const wasActive=state.capturing||state.dumping;state.capturing=false;state.dumping=false;stopTimers();state.lostConnections++;state.stoppedAt=performance.now();info(wasActive?'BLE deconectat în timpul operațiunii: fișierul poate fi incomplet.':'Conexiunea BLE s-a închis.',wasActive?'error':'warn');update();}
+async function connect(){
+ if(!('bluetooth' in navigator)){info('Web Bluetooth indisponibil. Deschide URL-ul HTTPS în aplicația Bluefy, nu în Safari.', 'error');return;}
+ $('connect').disabled=true;
+ try {
+  log('Se caută MBito-Sniffer...');
+  const device=await navigator.bluetooth.requestDevice({filters:[{namePrefix:'MBito-Sniffer'}],optionalServices:[SERVICE]});
+  state.device=device;device.addEventListener('gattserverdisconnected',onDisconnect,{once:true});
+  const server=await device.gatt.connect();const service=await server.getPrimaryService(SERVICE);
+  state.control=await service.getCharacteristic(CONTROL);state.data=await service.getCharacteristic(DATA);
+  state.data.addEventListener('characteristicvaluechanged',onNotification);await state.data.startNotifications();
+  state.connected=true;info('Conectat la '+(device.name||'MBito-Sniffer')+'. Notify activ pe FFF2.','normal');
+  await requestStatus();update();
+ }catch(e){info('Conexiune eșuată: '+(e?.message||e),'error');update();}
+}
+function disconnect(){try {state.device?.gatt?.disconnect();}catch(e){log('Deconectare: '+e.message);}if(state.connected)onDisconnect();}
+async function rawCommand(byte){if(!state.connected||!state.control)throw Error('MBito nu este conectat');const v=new Uint8Array([byte]);if(typeof state.control.writeValueWithResponse==='function')await state.control.writeValueWithResponse(v);else if(typeof state.control.writeValueWithoutResponse==='function')await state.control.writeValueWithoutResponse(v);else await state.control.writeValue(v);log('CMD '+hexByte(byte));}
+async function command(byte){return gattExclusive(()=>rawCommand(byte));}
+async function requestStatus(){if(!state.connected)return;try{await gattExclusive(async()=>{await rawCommand(0x05);const dv=state.data?await state.data.readValue():null;const b=dv?new Uint8Array(dv.buffer,dv.byteOffset,dv.byteLength).slice():null;if(b&&b[0]===0xA2)updateStatus(parsedStatus(b));});}catch(e){log('Status: '+e.message);}}
+function updateStatus(x){state.status=x;state.capturing=x.capturing||state.capturing&&!state.dumping;if(!x.capturing&&state.capturing){state.capturing=false;stopTimers();}update();}
+function onNotification(ev){const dv=ev.target?.value;if(!dv)return;const b=new Uint8Array(dv.buffer,dv.byteOffset,dv.byteLength).slice();try{
+ switch(b[0]){
+  case 0xA2: updateStatus(parsedStatus(b));break;
+  case 0xA1: {const f=parsedFrame(b);const last=state.frames[state.frames.length-1];if(last){const gap=(f.seq8-last.seq8+256)%256;if(gap!==1)state.sequenceGaps++;}state.frames.push(f);state.downloadNotified++;if((state.frames.length%100)===0){update();}break;}
+  case 0xA3: {if(b.length<9)throw Error('Sfârșit dump incomplet');state.expected=u32(b,1);state.dumpOverwritten=u32(b,5);state.endReceived=true;state.dumping=false;log(`A3 END: așteptate=${fmt(state.expected)}, primite=${fmt(state.frames.length)}, suprascrise=${fmt(state.dumpOverwritten)}`);
+    if(state.frames.length!==state.expected)info(`Descărcare INCOMPLETĂ: ${fmt(state.frames.length)}/${fmt(state.expected)} cadre.`, 'warn');
+    else if(state.dumpOverwritten>0)info(`Descărcare completă (${fmt(state.frames.length)}), dar ${fmt(state.dumpOverwritten)} cadre vechi au fost suprascrise pe dongle.`, 'warn');
+    else info(`Descărcare completă: ${fmt(state.frames.length)} cadre CAN.`, 'normal');render();update();break;}
+  default:log('Pachet necunoscut: '+Array.from(b).map(hexByte).join(' '));
+ }
+ }catch(e){state.notificationErrors++;log('Notificare invalidă: '+e.message);} }
+function resetSession(){state.frames=[];state.expected=null;state.endReceived=false;state.dumpOverwritten=null;state.markers=[];state.sequenceGaps=0;state.notificationErrors=0;state.downloadNotified=0;state.stoppedAt=null;render();update();}
+async function start(){try{
+ resetSession();await command(0x01);state.startedAt=new Date().toISOString();state.startedPerf=performance.now();state.capturing=true;state.status={capturing:true,count:0,overwritten:0,dumping:false};info('Captură pornită. Buffer: 4096 cadre.');
+ state.ticker=setInterval(update,250);state.poller=setInterval(()=>{if(state.connected&&state.capturing)void requestStatus();},1200);
+ const sec=Number($('duration').value);if(sec>0){state.timer=setTimeout(()=>void stop(),sec*1000);}
+ update();
+ }catch(e){info('START eșuat: '+e.message,'error');update();}}
+async function stop(){if(!state.connected||!state.capturing)return;try{stopTimers();await command(0x02);state.capturing=false;state.stoppedAt=performance.now();info('Captură oprită. Se descarcă prin BLE...');update();await dump();}catch(e){info('STOP eșuat: '+e.message,'error');update();}}
+async function dump(){if(state.capturing){info('Oprește captura înainte de DUMP.','warn');return;}if(state.dumping)return;try{
+ state.frames=[];state.expected=null;state.endReceived=false;state.dumpOverwritten=null;state.downloadNotified=0;state.sequenceGaps=0;state.dumping=true;update();
+ await command(0x03);info('DUMP pornit. Lasă Bluefy deschis până la A3.');update();
+ // Firmware-ul nu trimite răspuns dacă dump este refuzat. Avertizare după 45 s, fără a elimina datele.
+ setTimeout(()=>{if(state.dumping){info('DUMP încă în curs. Dacă nu sosesc cadre sau A3, verifică BLE/Notify; nu șterge sesiunea.','warn');}},45000);
+ }catch(e){state.dumping=false;info('DUMP eșuat: '+e.message,'error');update();}}
+function mark(){if(!state.capturing||state.startedAt===null)return;const elapsed=(performance.now()-state.startedPerf)/1000;const marker={event:'UNLOCK',elapsedSec:+elapsed.toFixed(3),at:new Date().toISOString()};state.markers.push(marker);log(`◆ MARKER UNLOCK +${elapsed.toFixed(3)} s`);info(`UNLOCK marcat la +${elapsed.toFixed(2)} s.`);}
+function bytesHex(arr){return arr.map(hexByte).join(' ');}
+function render(){const filter=$('filter').value.trim().toUpperCase().replace(/^0X/,'');const frames=state.frames.filter(f=>!filter||hexId(f.id).includes(filter)||bytesHex(f.data).includes(filter));setText('listed',`${fmt(frames.length)} / ${fmt(state.frames.length)} cadre`);const tbody=$('tbody');tbody.replaceChildren();if(!frames.length){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=5;td.textContent=state.frames.length?'Niciun rezultat.':'Nicio captură descărcată.';tr.append(td);tbody.append(tr);return;}
+ const base=state.frames[0]?.timestampMs??0;const frag=document.createDocumentFragment();for(let i=0;i<Math.min(frames.length,250);i++){const f=frames[i];const tr=document.createElement('tr');const ix=document.createElement('td');ix.textContent=String(i+1);const t=document.createElement('td');t.textContent=`+${((f.timestampMs-base)/1000).toFixed(3)}s`;const id=document.createElement('td');const code=document.createElement('code');code.textContent=hexId(f.id);id.append(code);const dlc=document.createElement('td');dlc.textContent=String(f.dlc);const dat=document.createElement('td');dat.textContent=bytesHex(f.data);tr.append(ix,t,id,dlc,dat);frag.append(tr);}tbody.append(frag);if(frames.length>250){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=5;td.textContent=`Afișate primele 250 din ${fmt(frames.length)}. Exportul conține toate cadrele.`;tr.append(td);tbody.append(tr);}}
+function details(){return {app:'MBito CAN Capture',version:'1.0',exportedAt:new Date().toISOString(),startedAt:state.startedAt,endedAt:state.stoppedAt===null?null:new Date().toISOString(),firmwareProtocol:'MBito-Sniffer FFF0/FFF1/FFF2 (A1/A2/A3)',maxFirmwareFrames:MAX_FRAMES,bufferStatus:state.status,expectedFrames:state.expected,downloadedFrames:state.frames.length,overwrittenBeforeDump:state.dumpOverwritten,completeDownload:state.endReceived&&state.expected===state.frames.length,sequenceGapsObserved:state.sequenceGaps,notificationErrors:state.notificationErrors,markers:state.markers};}
+function download(s,name,type){const blob=new Blob([s],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),15000);log('Exportat: '+name);}
+function exportData(kind){if(!hasData())return;const name='mbito-can-'+new Date().toISOString().replace(/[:.]/g,'-');const base=state.frames[0].timestampMs;const frames=state.frames.map((f,i)=>({...f,index:i+1,relMs:f.timestampMs-base,idHex:hexId(f.id),dataHex:bytesHex(f.data)}));if(kind==='json'){download(JSON.stringify({...details(),frames},null,2),name+'.json','application/json');return;}
+ const q=s=>'"'+String(s??'').replaceAll('"','""')+'"';const rows=[['index','timestamp_ms','relative_ms','can_id_hex','extended','rtr','dlc','data_hex','seq8'].join(',')];for(const f of frames)rows.push([f.index,f.timestampMs,f.relMs,f.idHex,f.extended?1:0,f.rtr?1:0,f.dlc,q(f.dataHex),f.seq8].join(','));download(rows.join('\r\n'),name+'.csv','text/csv;charset=utf-8');}
+$('connect').addEventListener('click',()=>void connect());$('disconnect').addEventListener('click',disconnect);$('start').addEventListener('click',()=>void start());$('stop').addEventListener('click',()=>void stop());$('dump').addEventListener('click',()=>void dump());$('status').addEventListener('click',()=>void requestStatus());$('mark').addEventListener('click',mark);$('csv').addEventListener('click',()=>exportData('csv'));$('json').addEventListener('click',()=>exportData('json'));$('clear').addEventListener('click',()=>{if(confirm('Ștergi captura din memoria aplicației?'))resetSession();});$('filter').addEventListener('input',render);
+window.addEventListener('pagehide',()=>{if(state.capturing||state.dumping)log('Atenție: pagina se închide în timpul capturii.');});
+log('Gata. Deschide în Bluefy și conectează MBito-Sniffer.');update();
+</script>
+</body>
+</html>
