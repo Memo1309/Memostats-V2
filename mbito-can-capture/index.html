@@ -210,7 +210,7 @@ async function connect(){
 function disconnect(){try {state.device?.gatt?.disconnect();}catch(e){log('Deconectare: '+e.message);}if(state.connected)onDisconnect();}
 async function rawCommand(byte){if(!state.connected||!state.control)throw Error('MBito nu este conectat');const v=new Uint8Array([byte]);if(typeof state.control.writeValueWithResponse==='function')await state.control.writeValueWithResponse(v);else if(typeof state.control.writeValueWithoutResponse==='function')await state.control.writeValueWithoutResponse(v);else await state.control.writeValue(v);log('CMD '+hexByte(byte));}
 async function command(byte){return gattExclusive(()=>rawCommand(byte));}
-async function requestStatus(){if(!state.connected)return;try{await gattExclusive(async()=>{await rawCommand(0x05);const dv=state.data?await state.data.readValue():null;const b=dv?new Uint8Array(dv.buffer,dv.byteOffset,dv.byteLength).slice():null;if(b&&b[0]===0xA2)updateStatus(parsedStatus(b));});}catch(e){log('Status: '+e.message);}}
+async function requestStatus(){if(!state.connected)return;try{await gattExclusive(async()=>{const dv=state.data?await state.data.readValue():null;const b=dv?new Uint8Array(dv.buffer,dv.byteOffset,dv.byteLength).slice():null;if(b&&b[0]===0xA2)updateStatus(parsedStatus(b));});}catch(e){log('Status READ: '+e.message);}}
 function updateStatus(x){state.status=x;state.capturing=x.capturing||state.capturing&&!state.dumping;if(!x.capturing&&state.capturing){state.capturing=false;stopTimers();}update();}
 function onNotification(ev){const dv=ev.target?.value;if(!dv)return;const b=new Uint8Array(dv.buffer,dv.byteOffset,dv.byteLength).slice();try{
  switch(b[0]){
@@ -226,7 +226,9 @@ function onNotification(ev){const dv=ev.target?.value;if(!dv)return;const b=new 
 function resetSession(){state.frames=[];state.expected=null;state.endReceived=false;state.dumpOverwritten=null;state.markers=[];state.sequenceGaps=0;state.notificationErrors=0;state.downloadNotified=0;state.stoppedAt=null;render();update();}
 async function start(){try{
  resetSession();await command(0x01);state.startedAt=new Date().toISOString();state.startedPerf=performance.now();state.capturing=true;state.status={capturing:true,count:0,overwritten:0,dumping:false};info('Captură pornită. Buffer: 4096 cadre.');
- state.ticker=setInterval(update,250);state.poller=setInterval(()=>{if(state.connected&&state.capturing)void requestStatus();},1200);
+ state.ticker=setInterval(update,250);
+ // Nu facem polling GATT în timpul capturii: Bluefy/iOS e mult mai stabil dacă legătura BLE rămâne idle.
+ // Firmware-ul continuă să captureze CAN local; statusul final vine la STOP/DUMP.
  const sec=Number($('duration').value);if(sec>0){state.timer=setTimeout(()=>void stop(),sec*1000);}
  update();
  }catch(e){info('START eșuat: '+e.message,'error');update();}}
