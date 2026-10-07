@@ -163,8 +163,33 @@ async function connect(){
   step='descoperirea serviciului FFF0';info('Pas 3/5: caut serviciul FFF0...');
   const service=await server.getPrimaryService(SERVICE);
   step='descoperirea caracteristicilor FFF1/FFF2';info('Pas 4/5: caut FFF1/FFF2...');
-  state.control=await service.getCharacteristic(CONTROL);
-  state.data=await service.getCharacteristic(DATA);
+  const normUuid=u=>String(u||'').toLowerCase();
+  const wantedCtrl=normUuid(CONTROL), wantedData=normUuid(DATA);
+  let chars=null, lastCharError=null;
+  for(let attempt=1;attempt<=3;attempt++){
+    try{
+      chars=await service.getCharacteristics();
+      log('Caracteristici găsite (încercarea '+attempt+'): '+chars.map(ch=>ch.uuid).join(', '));
+      break;
+    }catch(err){
+      lastCharError=err;
+      log('Enumerare caracteristici eșuată #'+attempt+': '+(err?.message||err));
+      await new Promise(resolve=>setTimeout(resolve,300*attempt));
+    }
+  }
+  if(chars){
+    state.control=chars.find(ch=>normUuid(ch.uuid)===wantedCtrl || normUuid(ch.uuid).startsWith('0000fff1-'));
+    state.data=chars.find(ch=>normUuid(ch.uuid)===wantedData || normUuid(ch.uuid).startsWith('0000fff2-'));
+  }
+  if(!state.control || !state.data){
+    log('Fallback: caut FFF1/FFF2 individual.');
+    try{ if(!state.control) state.control=await service.getCharacteristic(CONTROL); }catch(err){ lastCharError=err; log('FFF1 individual: '+(err?.message||err)); }
+    try{ if(!state.data) state.data=await service.getCharacteristic(DATA); }catch(err){ lastCharError=err; log('FFF2 individual: '+(err?.message||err)); }
+  }
+  if(!state.control || !state.data){
+    const found=chars?.map(ch=>ch.uuid).join(', ')||'niciuna';
+    throw Error('FFF1/FFF2 nu au fost găsite. Bluefy a raportat: '+(lastCharError?.message||lastCharError||'fără detalii')+'. Descoperite: '+found);
+  }
   step='activarea notificărilor FFF2';info('Pas 5/5: activez notificările...');
   state.data.addEventListener('characteristicvaluechanged',onNotification);
   await state.data.startNotifications();
