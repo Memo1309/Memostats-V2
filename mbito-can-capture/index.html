@@ -103,7 +103,7 @@
   </section>
 
   <section class="card"><div class="between"><h2>Jurnal conexiune</h2><span class="eyebrow">BLE · local</span></div><div class="log" id="log" aria-live="polite"></div></section>
-  <p class="notes">Doar monitorizare: firmware-ul folosește CAN <span class="pill">LISTEN ONLY</span>. Aplicația trimite doar comenzi GATT de control către dongle, nu transmite cadre CAN în mașină. Ține mașina staționată la testare. Pentru a înregistra animația completă fără pierderi, actualizarea firmware-ului este necesară.</p>
+  <p class="notes">Doar monitorizare: firmware-ul folosește CAN <span class="pill">NORMAL / ACK</span> ca să confirme recepția cadrelor și să evite retransmisiile. Coada TX este dezactivată, iar firmware-ul nu apelează transmiterea CAN. Aplicația trimite doar comenzi GATT de control către dongle. Ține mașina staționată la testare. Pentru a înregistra animația completă fără pierderi, actualizarea firmware-ului este necesară.</p>
 </main>
 <script>
 'use strict';
