@@ -71,7 +71,7 @@
     <div class="between"><h2>01. Conexiune Bluetooth</h2><span class="eyebrow">FFF0 / FFF1 / FFF2</span></div>
     <p class="sub">Deschide această pagină în <b>Bluefy</b> pe iPhone. Se conectează direct la firmware-ul tău <b>MBito-Sniffer</b>. Nu mai ai nevoie de nRF Connect.</p>
     <div class="row"><button id="connect" class="primary">CONECTEAZĂ DONGLE</button><button id="disconnect" class="ghost" disabled>DECONECTEAZĂ</button></div>
-    <label class="sub" style="display:flex;align-items:flex-start;gap:10px;margin-top:14px"><input id="compat" type="checkbox" style="width:20px;height:20px;flex-shrink:0"> Mod compatibil Bluefy: afișează toate dispozitivele Bluetooth (alege doar MBito-Sniffer)</label>
+    <label class="sub" style="display:flex;align-items:flex-start;gap:10px;margin-top:14px"><input id="compat" type="checkbox" style="width:20px;height:20px;flex-shrink:0"> Mod compatibil Bluefy: afișează toate dispozitivele Bluetooth (folosește doar dacă filtrul FFF0 nu găsește dongle-ul)</label>
     <div id="message" class="info" role="status">Aștept conexiunea. Folosește Bluefy, nu Safari.</div>
   </section>
 
@@ -107,7 +107,10 @@
 </main>
 <script>
 'use strict';
-const SERVICE=0xFFF0, CONTROL=0xFFF1, DATA=0xFFF2, MAX_FRAMES=4096;
+const SERVICE='0000fff0-0000-1000-8000-00805f9b34fb';
+const CONTROL='0000fff1-0000-1000-8000-00805f9b34fb';
+const DATA='0000fff2-0000-1000-8000-00805f9b34fb';
+const MAX_FRAMES=4096;
 const $=id=>document.getElementById(id);
 let gattQueue=Promise.resolve();
 function gattExclusive(fn){const p=gattQueue.then(fn);gattQueue=p.catch(()=>{});return p;}
@@ -147,10 +150,10 @@ async function connect(){
  let step='selectarea dispozitivului';
  try {
   const compat=$('compat').checked;
-  log('Conectare BLE. Mod '+(compat?'compatibil (toate dispozitivele)':'filtrat după nume')+'.');
+    log('Conectare BLE. Mod '+(compat?'compatibil (toate dispozitivele)':'filtrat după serviciul FFF0')+'.');
   const options=compat
    ? {acceptAllDevices:true,optionalServices:[SERVICE]}
-   : {filters:[{namePrefix:'MBito'}],optionalServices:[SERVICE]};
+   : {filters:[{services:[SERVICE]}],optionalServices:[SERVICE]};
   info('Pas 1/5: caut și selectez MBito-Sniffer...');
   const device=await navigator.bluetooth.requestDevice(options);
   state.device=device;device.addEventListener('gattserverdisconnected',onDisconnect,{once:true});
