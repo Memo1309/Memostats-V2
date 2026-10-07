@@ -98,8 +98,8 @@
     <div class="between"><h2>03. Cadre CAN</h2><span id="listed" class="eyebrow">0 cadre</span></div>
     <input type="search" id="filter" placeholder="Filtrează după CAN ID sau date hex, ex. 622" spellcheck="false" />
     <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>#</th><th>TIMP</th><th>CAN ID</th><th>DLC</th><th>DATE HEX</th></tr></thead><tbody id="tbody"><tr><td colspan="5" class="muted">Nicio captură descărcată.</td></tr></tbody></table></div>
-    <div class="row"><button id="csv" disabled>EXPORT CSV</button><button id="json" disabled>EXPORT JSON</button><button id="clear" class="ghost" disabled>ȘTERGE SESIUNEA</button></div>
-    <p class="sub">Exportul este local, direct pe telefon. În JSON sunt păstrate și marcajele, contoarele și timpii.</p>
+    <div class="row"><button id="txt" class="primary" disabled>COPY → TXT</button><button id="csv" disabled>EXPORT CSV</button><button id="json" disabled>EXPORT JSON</button><button id="clear" class="ghost" disabled>ȘTERGE SESIUNEA</button></div>
+    <p class="sub">COPY → TXT creează un fișier .txt cu toate cadrele. Pe iPhone/Bluefy deschide foaia de partajare ca să-l salvezi în Files; dacă Share nu este disponibil, încearcă descărcarea directă.</p>
   </section>
 
   <section class="card"><div class="between"><h2>Jurnal conexiune</h2><span class="eyebrow">BLE · local</span></div><div class="log" id="log" aria-live="polite"></div></section>
@@ -133,7 +133,7 @@ function update(){
   $('mark').disabled=!state.capturing;
   $('dump').disabled=!state.connected||state.capturing||state.dumping;
   $('status').disabled=!state.connected||state.dumping;
-  $('csv').disabled=!hasData();$('json').disabled=!hasData();$('clear').disabled=state.capturing||state.dumping||(!hasData()&&!state.markers.length);
+  $('txt').disabled=!hasData();$('csv').disabled=!hasData();$('json').disabled=!hasData();$('clear').disabled=state.capturing||state.dumping||(!hasData()&&!state.markers.length);
   setText('phase',state.dumping?'DUMP':state.capturing?'RECORDING':'READY');
   setText('frames',fmt(state.status.count));setText('overwritten',fmt(state.status.overwritten));
   setText('received',fmt(state.frames.length));setText('expected',state.expected===null?'—':fmt(state.expected));
@@ -245,9 +245,51 @@ function render(){const filter=$('filter').value.trim().toUpperCase().replace(/^
  const base=state.frames[0]?.timestampMs??0;const frag=document.createDocumentFragment();for(let i=0;i<Math.min(frames.length,250);i++){const f=frames[i];const tr=document.createElement('tr');const ix=document.createElement('td');ix.textContent=String(i+1);const t=document.createElement('td');t.textContent=`+${((f.timestampMs-base)/1000).toFixed(3)}s`;const id=document.createElement('td');const code=document.createElement('code');code.textContent=hexId(f.id);id.append(code);const dlc=document.createElement('td');dlc.textContent=String(f.dlc);const dat=document.createElement('td');dat.textContent=bytesHex(f.data);tr.append(ix,t,id,dlc,dat);frag.append(tr);}tbody.append(frag);if(frames.length>250){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=5;td.textContent=`Afișate primele 250 din ${fmt(frames.length)}. Exportul conține toate cadrele.`;tr.append(td);tbody.append(tr);}}
 function details(){return {app:'MBito CAN Capture',version:'1.0',exportedAt:new Date().toISOString(),startedAt:state.startedAt,endedAt:state.stoppedAt===null?null:new Date().toISOString(),firmwareProtocol:'MBito-Sniffer FFF0/FFF1/FFF2 (A1/A2/A3)',maxFirmwareFrames:MAX_FRAMES,bufferStatus:state.status,expectedFrames:state.expected,downloadedFrames:state.frames.length,overwrittenBeforeDump:state.dumpOverwritten,completeDownload:state.endReceived&&state.expected===state.frames.length,sequenceGapsObserved:state.sequenceGaps,notificationErrors:state.notificationErrors,markers:state.markers};}
 function download(s,name,type){const blob=new Blob([s],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),15000);log('Exportat: '+name);}
+function buildTxt(){
+ if(!hasData())return '';
+ const base=state.frames[0].timestampMs;
+ const d=details();
+ const rows=[
+  'MBito CAN Capture',
+  'exported_at='+d.exportedAt,
+  'frames='+state.frames.length,
+  'expected='+(state.expected??''),
+  'overwritten='+(state.dumpOverwritten??state.status.overwritten??0),
+  'markers='+JSON.stringify(state.markers),
+  '',
+  '#\tTIME\tCAN_ID\tDLC\tDATA_HEX'
+ ];
+ state.frames.forEach((f,i)=>rows.push((i+1)+'\t+'+((f.timestampMs-base)/1000).toFixed(3)+'s\t'+hexId(f.id)+'\t'+f.dlc+'\t'+bytesHex(f.data)));
+ return rows.join('\r\n');
+}
+async function saveTxt(){
+ if(!hasData())return;
+ const text=buildTxt();
+ const name='mbito-can-'+new Date().toISOString().replace(/[:.]/g,'-')+'.txt';
+ const file=new File([text],name,{type:'text/plain;charset=utf-8'});
+ try{
+  if(navigator.share && (!navigator.canShare || navigator.canShare({files:[file]}))){
+   await navigator.share({files:[file],title:'MBito CAN Capture'});
+   log('TXT trimis către foaia de partajare: '+name);
+   info('TXT pregătit. Alege „Save to Files” / „Salvează în Fișiere”.');
+   return;
+  }
+ }catch(e){
+  if(e?.name==='AbortError'){log('Salvare TXT anulată de utilizator.');return;}
+  log('Web Share TXT indisponibil: '+(e?.message||e));
+ }
+ const blob=new Blob([text],{type:'text/plain;charset=utf-8'});
+ const url=URL.createObjectURL(blob);
+ const a=document.createElement('a');
+ a.href=url;a.download=name;a.rel='noopener';
+ document.body.append(a);a.click();a.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),60000);
+ log('TXT descărcat prin fallback: '+name);
+ info('Am cerut descărcarea TXT. Dacă Bluefy nu deschide Files, folosește din nou COPY → TXT și alege Save to Files.');
+}
 function exportData(kind){if(!hasData())return;const name='mbito-can-'+new Date().toISOString().replace(/[:.]/g,'-');const base=state.frames[0].timestampMs;const frames=state.frames.map((f,i)=>({...f,index:i+1,relMs:f.timestampMs-base,idHex:hexId(f.id),dataHex:bytesHex(f.data)}));if(kind==='json'){download(JSON.stringify({...details(),frames},null,2),name+'.json','application/json');return;}
  const q=s=>'"'+String(s??'').replaceAll('"','""')+'"';const rows=[['index','timestamp_ms','relative_ms','can_id_hex','extended','rtr','dlc','data_hex','seq8'].join(',')];for(const f of frames)rows.push([f.index,f.timestampMs,f.relMs,f.idHex,f.extended?1:0,f.rtr?1:0,f.dlc,q(f.dataHex),f.seq8].join(','));download(rows.join('\r\n'),name+'.csv','text/csv;charset=utf-8');}
-$('connect').addEventListener('click',()=>void connect());$('disconnect').addEventListener('click',disconnect);$('start').addEventListener('click',()=>void start());$('stop').addEventListener('click',()=>void stop());$('dump').addEventListener('click',()=>void dump());$('status').addEventListener('click',()=>void requestStatus());$('mark').addEventListener('click',mark);$('csv').addEventListener('click',()=>exportData('csv'));$('json').addEventListener('click',()=>exportData('json'));$('clear').addEventListener('click',()=>{if(confirm('Ștergi captura din memoria aplicației?'))resetSession();});$('filter').addEventListener('input',render);
+$('connect').addEventListener('click',()=>void connect());$('disconnect').addEventListener('click',disconnect);$('start').addEventListener('click',()=>void start());$('stop').addEventListener('click',()=>void stop());$('dump').addEventListener('click',()=>void dump());$('status').addEventListener('click',()=>void requestStatus());$('mark').addEventListener('click',mark);$('txt').addEventListener('click',()=>void saveTxt());$('csv').addEventListener('click',()=>exportData('csv'));$('json').addEventListener('click',()=>exportData('json'));$('clear').addEventListener('click',()=>{if(confirm('Ștergi captura din memoria aplicației?'))resetSession();});$('filter').addEventListener('input',render);
 window.addEventListener('pagehide',()=>{if(state.capturing||state.dumping)log('Atenție: pagina se închide în timpul capturii.');});
 log('Gata. Deschide în Bluefy și conectează MBito-Sniffer.');update();
 </script>
