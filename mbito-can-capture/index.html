@@ -71,6 +71,7 @@
     <div class="between"><h2>01. Conexiune Bluetooth</h2><span class="eyebrow">FFF0 / FFF1 / FFF2</span></div>
     <p class="sub">Deschide această pagină în <b>Bluefy</b> pe iPhone. Se conectează direct la firmware-ul tău <b>MBito-Sniffer</b>. Nu mai ai nevoie de nRF Connect.</p>
     <div class="row"><button id="connect" class="primary">CONECTEAZĂ DONGLE</button><button id="disconnect" class="ghost" disabled>DECONECTEAZĂ</button></div>
+    <label class="sub" style="display:flex;align-items:flex-start;gap:10px;margin-top:14px"><input id="compat" type="checkbox" style="width:20px;height:20px;flex-shrink:0"> Mod compatibil Bluefy: afișează toate dispozitivele Bluetooth (alege doar MBito-Sniffer)</label>
     <div id="message" class="info" role="status">Aștept conexiunea. Folosește Bluefy, nu Safari.</div>
   </section>
 
@@ -141,18 +142,42 @@ function update(){
 function stopTimers(){clearTimeout(state.timer);state.timer=null;clearInterval(state.ticker);state.ticker=null;clearInterval(state.poller);state.poller=null;}
 function onDisconnect(){if(!state.connected&&!state.control&&!state.data)return;state.connected=false;state.control=null;state.data=null;const wasActive=state.capturing||state.dumping;state.capturing=false;state.dumping=false;stopTimers();state.lostConnections++;state.stoppedAt=performance.now();info(wasActive?'BLE deconectat în timpul operațiunii: fișierul poate fi incomplet.':'Conexiunea BLE s-a închis.',wasActive?'error':'warn');update();}
 async function connect(){
- if(!('bluetooth' in navigator)){info('Web Bluetooth indisponibil. Deschide URL-ul HTTPS în aplicația Bluefy, nu în Safari.', 'error');return;}
+ if(!('bluetooth' in navigator)){info('Web Bluetooth indisponibil. Deschide URL-ul HTTPS în Bluefy, nu în Safari.','error');return;}
  $('connect').disabled=true;
+ let step='selectarea dispozitivului';
  try {
-  log('Se caută MBito-Sniffer...');
-  const device=await navigator.bluetooth.requestDevice({filters:[{namePrefix:'MBito-Sniffer'}],optionalServices:[SERVICE]});
+  const compat=$('compat').checked;
+  log('Conectare BLE. Mod '+(compat?'compatibil (toate dispozitivele)':'filtrat după nume')+'.');
+  const options=compat
+   ? {acceptAllDevices:true,optionalServices:[SERVICE]}
+   : {filters:[{namePrefix:'MBito'}],optionalServices:[SERVICE]};
+  info('Pas 1/5: caut și selectez MBito-Sniffer...');
+  const device=await navigator.bluetooth.requestDevice(options);
   state.device=device;device.addEventListener('gattserverdisconnected',onDisconnect,{once:true});
-  const server=await device.gatt.connect();const service=await server.getPrimaryService(SERVICE);
-  state.control=await service.getCharacteristic(CONTROL);state.data=await service.getCharacteristic(DATA);
-  state.data.addEventListener('characteristicvaluechanged',onNotification);await state.data.startNotifications();
-  state.connected=true;info('Conectat la '+(device.name||'MBito-Sniffer')+'. Notify activ pe FFF2.','normal');
+  log('BLE ales: '+(device.name||'(fără nume)'));
+  step='conectarea GATT';info('Pas 2/5: conectare GATT...');
+  const server=await device.gatt.connect();
+  step='descoperirea serviciului FFF0';info('Pas 3/5: caut serviciul FFF0...');
+  const service=await server.getPrimaryService(SERVICE);
+  step='descoperirea caracteristicilor FFF1/FFF2';info('Pas 4/5: caut FFF1/FFF2...');
+  state.control=await service.getCharacteristic(CONTROL);
+  state.data=await service.getCharacteristic(DATA);
+  step='activarea notificărilor FFF2';info('Pas 5/5: activez notificările...');
+  state.data.addEventListener('characteristicvaluechanged',onNotification);
+  await state.data.startNotifications();
+  state.connected=true;info('Conectat la '+(device.name||'MBito-Sniffer')+'. Notify activ pe FFF2.');
   await requestStatus();update();
- }catch(e){info('Conexiune eșuată: '+(e?.message||e),'error');update();}
+ }catch(e){
+  const detail=(e&&typeof e==='object'&&'message' in e&&e.message)?String(e.message):String(e);
+  const name=e&&typeof e==='object'&&'name' in e?String(e.name):'';
+  const suffix=step==='selectarea dispozitivului'
+    ? ' Dacă nu apare dispozitivul, activează „Mod compatibil Bluefy”.'
+    : ' Închide nRF Connect și încearcă din nou după reconectarea dongle-ului.';
+  info('Eroare la '+step+': '+detail+(name?' ['+name+']':'')+'.'+suffix,'error');
+  try{if(!state.connected)state.device?.gatt?.disconnect();}catch(_e){/* ignore cleanup */ }
+  if(!state.connected){state.device=null;state.control=null;state.data=null;}
+  update();
+ }
 }
 function disconnect(){try {state.device?.gatt?.disconnect();}catch(e){log('Deconectare: '+e.message);}if(state.connected)onDisconnect();}
 async function rawCommand(byte){if(!state.connected||!state.control)throw Error('MBito nu este conectat');const v=new Uint8Array([byte]);if(typeof state.control.writeValueWithResponse==='function')await state.control.writeValueWithResponse(v);else if(typeof state.control.writeValueWithoutResponse==='function')await state.control.writeValueWithoutResponse(v);else await state.control.writeValue(v);log('CMD '+hexByte(byte));}
