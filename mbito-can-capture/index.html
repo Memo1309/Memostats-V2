@@ -103,7 +103,7 @@
     <div class="row"><button id="diagSession" data-diag>SESSION 10 03</button><button id="diagOem" data-diag>OEM / RETURN</button><button id="diagGlobalOem" data-diag>GLOBAL OEM</button></div>
     <div class="row"><button id="ch1" data-diag>CH1</button><button id="ch2" data-diag>CH2</button><button id="ch3" data-diag>CH3</button><button id="ch4" data-diag>CH4</button><button id="ch5" data-diag>CH5</button><button id="ch6" data-diag>CH6</button></div>
     <div class="line"></div>
-    <div class="segment"><label for="manualId">CAN ID</label><input id="manualId" value="76A" autocomplete="off" spellcheck="false" style="flex:0 1 110px"><label for="manualData">DATE HEX</label><input id="manualData" value="02 10 03 00 00 00 00 00" autocomplete="off" spellcheck="false" style="flex:1 1 280px"></div>
+    <div class="segment"><label for="manualId">CAN ID</label><input id="manualId" value="76A" autocomplete="off" spellcheck="false" style="flex:0 1 110px"><label for="manualData">DATE HEX</label><input id="manualData" value="02 10 03 00 00 00 00 00" autocomplete="off" spellcheck="false" style="flex:1 1 280px"><label for="manualRtr">RTR</label><input type="checkbox" id="manualRtr"></div>
     <div class="row"><button id="manualSend" class="primary" data-diag>TRIMITE CADRUL</button></div>
     <div id="diagResult" class="info">Conectează dongle-ul. Pentru citirea răspunsului, ține captura pornită în secțiunea 02.</div>
   </section>
@@ -328,23 +328,23 @@ async function completeBleAuth(){
 }
 function parseHexBytes(text){
  const parts=text.trim().split(/[\s,;:-]+/).filter(Boolean);
- if(!parts.length)throw Error('Nu ai introdus date CAN');
+ if(!parts.length)return [];
  const out=parts.map(x=>{if(!/^[0-9a-fA-F]{1,2}$/.test(x))throw Error('Byte invalid: '+x);return parseInt(x,16);});
  if(out.length>8)throw Error('Un cadru CAN clasic are maximum 8 bytes');
  return out;
 }
-function buildTxPacket(id,data){
+function buildTxPacket(id,data,rtr=false){
  if(!Number.isInteger(id)||id<0||id>0x1FFFFFFF)throw Error('CAN ID invalid');
  const p=new Uint8Array(15);
- p[0]=CMD_TX_CAN;p[1]=id>0x7FF?1:0;
+ p[0]=CMD_TX_CAN;p[1]=(id>0x7FF?1:0)|(rtr?2:0);
  p[2]=id&0xFF;p[3]=(id>>>8)&0xFF;p[4]=(id>>>16)&0xFF;p[5]=(id>>>24)&0xFF;
  p[6]=data.length;
  for(let i=0;i<data.length;i++)p[7+i]=data[i];
  return p;
 }
-async function sendCan(id,data,label){
+async function sendCan(id,data,label,rtr=false){
  try{
-  await commandPacket(buildTxPacket(id,data));
+  await commandPacket(buildTxPacket(id,data,rtr));
   $('diagResult').textContent=label+' trimis: '+hexId(id)+'  '+bytesHex(data)+(state.capturing?' | RX este în captură.':' | ATENȚIE: captura nu este pornită.');
   $('diagResult').className=state.capturing?'info':'info warn';
  }catch(e){$('diagResult').textContent='TX eșuat: '+e.message;$('diagResult').className='info error';log('TX: '+e.message);}
@@ -408,7 +408,7 @@ $('diagGlobalOem').addEventListener('click',()=>void runHli('GLOBAL OEM',[0x04,0
 for(let n=1;n<=6;n++)$('ch'+n).addEventListener('click',()=>void runHli('CH'+n+' ON',hliChannel(n)));
 $('authTx').addEventListener('click',()=>void beginBleAuth());
 $('capsTx').addEventListener('click',()=>void command(0x09));
-$('manualSend').addEventListener('click',()=>{try{const t=$('manualId').value.trim().replace(/^0x/i,'');if(!/^[0-9a-fA-F]+$/.test(t))throw Error('CAN ID invalid');const id=parseInt(t,16);const data=parseHexBytes($('manualData').value);void sendCan(id,data,'MANUAL');}catch(e){$('diagResult').textContent='Eroare: '+e.message;$('diagResult').className='info error';}});
+$('manualSend').addEventListener('click',()=>{try{const t=$('manualId').value.trim().replace(/^0x/i,'');if(!/^[0-9a-fA-F]+$/.test(t))throw Error('CAN ID invalid');const id=parseInt(t,16);const data=parseHexBytes($('manualData').value);void sendCan(id,data,'MANUAL',$('manualRtr').checked);}catch(e){$('diagResult').textContent='Eroare: '+e.message;$('diagResult').className='info error';}});
 window.addEventListener('pagehide',()=>{if(state.capturing||state.dumping)log('Atenție: pagina se închide în timpul capturii.');});
 log('Gata. Deschide în Bluefy și conectează MBito-Sniffer.');update();
 </script>
