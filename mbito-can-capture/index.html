@@ -63,6 +63,10 @@
     .simple-grid .white-btn { background:#e9eef4; border-color:#fff; color:#111820; }
     .simple-grid .blue-btn { background:#173c67; border-color:#397ec2; color:#d9eeff; }
     .simple-status { margin-top:14px; font-size:14px; line-height:1.5; }
+    .us-btn { width:100%; background:#47301b; border-color:#a86f31; color:#ffdfaa; }
+    .us-btn.active { background:#67421b; border-color:#ffc46e; color:#fff3dc; }
+    .safety-check { display:flex; gap:10px; align-items:flex-start; margin-top:13px; color:var(--muted); font-size:12px; line-height:1.55; }
+    .safety-check input { flex:0 0 20px; width:20px; height:20px; margin-top:1px; }
     .advanced-panel { display:none; }
     body.advanced .advanced-panel { display:block; }
     [hidden] { display:none !important; }
@@ -86,14 +90,19 @@
 
   <section class="card simple-card">
     <div class="between"><h2>02. Control simplu</h2><span class="eyebrow">W176 HLI</span></div>
-    <p class="sub">Alegi farul și apeși direct culoarea. Aplicația deschide automat sesiunea HLI și trimite comanda. TX se deblochează automat după conectare.</p>
-    <div class="segment"><label for="simpleSide">Far</label><select id="simpleSide"><option value="left">STÂNGA</option><option value="right">DREAPTA</option></select></div>
+    <p class="sub">Mod exclusiv: aprinde doar canalul selectat și comandă OFF pe celelalte CH1–CH6. Operațiile se fac secvențial prin HLI și pot afecta faza scurtă/lungă. Nu folosi pe drum.</p>
+    <div class="segment"><label for="simpleSide">Far</label><select id="simpleSide"><option value="both" selected>AMBELE</option><option value="left">STÂNGA</option><option value="right">DREAPTA</option></select></div>
+    <label class="safety-check"><input id="simpleParked" type="checkbox">Confirm că vehiculul este staționat într-un spațiu privat și că înțeleg că modul exclusiv oprește inclusiv CH4 (fază scurtă) și CH5 (fază lungă).</label>
     <div class="simple-grid">
       <button id="simpleAmber" class="amber-btn" disabled>AMBER</button>
       <button id="simpleWhite" class="white-btn" disabled>WHITE</button>
       <button id="simpleBlue" class="blue-btn" disabled>BLUE 100%</button>
     </div>
-    <div class="row"><button id="simpleOem" disabled>REVINO OEM</button><button id="simpleScan" class="primary" disabled>SCAN CAN</button></div>
+    <div class="row"><button id="simpleOem" class="stop" disabled>OEM AMBELE · RESTAUREAZĂ</button><button id="simpleScan" class="primary" disabled>SCAN CAN</button></div>
+    <div class="line"></div>
+    <div class="between"><strong>US Style</strong><span class="eyebrow">AMBER · AMBELE FARURI</span></div>
+    <p class="sub">CH1 AMBER activ pe ambele faruri; celelalte canale rămân sub controlul OEM. Nu garantează prioritatea semnalizărilor, care trebuie verificată separat în staționare.</p>
+    <div class="row"><button id="simpleUs" class="us-btn" disabled>ACTIVEAZĂ US STYLE</button></div>
     <div class="line"></div>
     <div class="between"><strong>Buton fizic</strong><span class="eyebrow">ACCEPT CALL</span></div>
     <p class="sub">Test direct prin SCCM166. Aplicația citește DID 0x0160 cu butonul liber, apoi încă o dată când ții apăsat ACCEPT CALL și găsește automat byte-ul/bitul schimbat.</p>
@@ -166,7 +175,7 @@ const DIAG_ECUS={left:{name:'HLI_FL176',tx:0x76A,rx:0x4AD},right:{name:'HLI_FR17
 const $=id=>document.getElementById(id);
 let gattQueue=Promise.resolve();
 function gattExclusive(fn){const p=gattQueue.then(fn);gattQueue=p.catch(()=>{});return p;}
-const state={device:null,control:null,data:null,connected:false,capturing:false,dumping:false,txUnlocked:false,txChallenge:null,authPending:false,simpleBusy:false,frames:[],status:{capturing:false,count:0,overwritten:0,dumping:false},timer:null,ticker:null,poller:null,startedAt:null,startedPerf:0,stoppedAt:null,markers:[],expected:null,endReceived:false,lostConnections:0,notificationErrors:0,downloadNotified:0,sequenceGaps:0,dumpOverwritten:null};
+const state={device:null,control:null,data:null,connected:false,capturing:false,dumping:false,txUnlocked:false,txChallenge:null,authPending:false,simpleBusy:false,usStyleActive:false,frames:[],status:{capturing:false,count:0,overwritten:0,dumping:false},timer:null,ticker:null,poller:null,startedAt:null,startedPerf:0,stoppedAt:null,markers:[],expected:null,endReceived:false,lostConnections:0,notificationErrors:0,downloadNotified:0,sequenceGaps:0,dumpOverwritten:null};
 function log(s){const node=$('log');node.textContent+=`[${new Date().toLocaleTimeString('ro-RO')}] ${s}\n`;node.scrollTop=node.scrollHeight;const lines=node.textContent.split('\n');if(lines.length>170)node.textContent=lines.slice(-120).join('\n');}
 function info(s,kind='normal'){const e=$('message');e.textContent=s;e.className='info'+(kind==='error'?' error':kind==='warn'?' warn':'');log(s);}
 function u32(b,i){return (b[i]|(b[i+1]<<8)|(b[i+2]<<16)|(b[i+3]<<24))>>>0;}
@@ -197,13 +206,17 @@ function update(){
   document.querySelectorAll('[data-auth]').forEach(b=>b.disabled=!state.connected||state.dumping);
   $('authTx').textContent=state.txUnlocked?'TX DEBLOCAT':'DEBLOCHEAZĂ TX';
   const simpleReady=state.connected&&state.txUnlocked&&!state.simpleBusy&&!state.dumping;
-  ['simpleAmber','simpleWhite','simpleBlue','simpleOem'].forEach(id=>$(id).disabled=!simpleReady);
+  const parked=$('simpleParked').checked;
+  ['simpleAmber','simpleWhite','simpleBlue','simpleUs'].forEach(id=>$(id).disabled=!simpleReady||!parked);
+  $('simpleOem').disabled=!simpleReady;
+  $('simpleUs').textContent=state.usStyleActive?'DEZACTIVEAZĂ US STYLE':'ACTIVEAZĂ US STYLE';
+  $('simpleUs').classList.toggle('active',state.usStyleActive);
   $('simpleScan').disabled=!state.connected||state.simpleBusy||state.capturing||state.dumping;
   $('learnAccept').disabled=!state.connected||state.simpleBusy||state.capturing||state.dumping;
   if(state.connected&&!state.txUnlocked&&!state.authPending&&!state.simpleBusy)$('simpleStatus').textContent='Conectat. Se așteaptă deblocarea automată TX...';
 }
 function stopTimers(){clearTimeout(state.timer);state.timer=null;clearInterval(state.ticker);state.ticker=null;clearInterval(state.poller);state.poller=null;}
-function onDisconnect(){if(!state.connected&&!state.control&&!state.data)return;state.connected=false;state.control=null;state.data=null;state.txUnlocked=false;state.txChallenge=null;state.authPending=false;state.simpleBusy=false;const wasActive=state.capturing||state.dumping;state.capturing=false;state.dumping=false;stopTimers();state.lostConnections++;state.stoppedAt=performance.now();info(wasActive?'BLE deconectat în timpul operațiunii: fișierul poate fi incomplet.':'Conexiunea BLE s-a închis.',wasActive?'error':'warn');update();}
+function onDisconnect(){if(!state.connected&&!state.control&&!state.data)return;state.connected=false;state.control=null;state.data=null;state.txUnlocked=false;state.txChallenge=null;state.authPending=false;state.simpleBusy=false;state.usStyleActive=false;const wasActive=state.capturing||state.dumping;state.capturing=false;state.dumping=false;stopTimers();state.lostConnections++;state.stoppedAt=performance.now();info(wasActive?'BLE deconectat în timpul operațiunii: fișierul poate fi incomplet.':'Conexiunea BLE s-a închis.',wasActive?'error':'warn');update();}
 async function connect(){
  if(!('bluetooth' in navigator)){info('Web Bluetooth indisponibil. Deschide URL-ul HTTPS în Bluefy, nu în Safari.','error');return;}
  $('connect').disabled=true;
@@ -304,7 +317,7 @@ function onNotification(ev){const dv=ev.target?.value;if(!dv)return;const b=new 
     $('diagResult').textContent=state.txUnlocked?'TX BLE deblocat pentru maximum 15 minute.':'Cheie incorectă sau autentificare respinsă.';
     $('diagResult').className=state.txUnlocked?'info':'info error';
     log('AUTH '+(state.txUnlocked?'OK':'FAIL'));
-    $('simpleStatus').textContent=state.txUnlocked?'Gata. Alege STÂNGA/DREAPTA și apasă AMBER, WHITE sau BLUE.':'Autentificarea TX a eșuat.';
+    $('simpleStatus').textContent=state.txUnlocked?'TX activ. Confirmă staționarea, apoi selectează AMBELE/STÂNGA/DREAPTA și un mod de iluminare.':'Autentificarea TX a eșuat.';
     update();break;
   }
   case PKT_CAPS: {
@@ -389,57 +402,103 @@ async function sendCan(id,data,label,rtr=false){
 }
 function runHli(label,data){const ecu=DIAG_ECUS[$('diagEcu').value];return sendCan(ecu.tx,data,ecu.name+' · '+label);}
 function hliChannel(n){const mask=1<<(n-1);return [0x06,0x2F,0x00,0x08,0x03,mask,mask,0x00];}
+const HLI_SESSION=[0x02,0x10,0x03,0,0,0,0,0];
+const HLI_OEM=[0x04,0x2F,0x00,0x08,0x00,0,0,0];
+const HLI_ALL_MASK=0x3F;
+function hliExclusive(n){const on=1<<(n-1);return [0x06,0x2F,0x00,0x08,0x03,HLI_ALL_MASK,on,0x00];}
 function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
+function simpleSides(){return $('simpleSide').value==='both'?[DIAG_ECUS.left,DIAG_ECUS.right]:[DIAG_ECUS[$('simpleSide').value]];}
+function simpleReady(){return state.connected&&state.txUnlocked&&!state.simpleBusy&&!state.dumping;}
+function simpleGuard(){return simpleReady()&&$('simpleParked').checked;}
+async function simpleTx(ecu,bytes,label){
+  if(!state.connected||!state.txUnlocked)throw Error('BLE TX deconectat sau blocat');
+  // GATT confirmation only: ECU acceptance is checked separately via CAN capture.
+  await commandPacket(buildTxPacket(ecu.tx,bytes));
+  log('LIGHT '+ecu.name+' · '+label+': '+bytesHex(bytes));
+}
+async function simpleStart(ecu){
+  await simpleTx(ecu,HLI_SESSION,'SESSION');
+  await sleep(140);
+}
+async function simpleOemEcu(ecu){
+  await simpleTx(ecu,HLI_OEM,'OEM');
+  await sleep(140);
+}
+async function simpleOemBoth(){
+  for(const ecu of [DIAG_ECUS.left,DIAG_ECUS.right]){await simpleStart(ecu);await simpleOemEcu(ecu);}
+  state.usStyleActive=false;
+}
+async function simpleBlueIntensity(ecu,percent){
+  const pwm=percent&0xFF;
+  // Match tested app behavior: ISO-TP first frame followed by a paced CF.
+  await sleep(100);
+  await simpleTx(ecu,[0x10,0x08,0x2F,0x00,0x09,0x03,0x06,pwm],'BLUE PWM FF');
+  await sleep(140);
+  await simpleTx(ecu,[0x21,0xFF,0xFF,0,0,0,0,0],'BLUE PWM CF');
+}
 async function simpleSetColor(channel,label){
- if(!state.connected||!state.txUnlocked||state.simpleBusy)return;
- state.simpleBusy=true;update();
- const ecu=DIAG_ECUS[$('simpleSide').value];
- try{
-   $('simpleStatus').textContent=ecu.name+' · deschid sesiunea...';
-   await sendCan(ecu.tx,[0x02,0x10,0x03,0,0,0,0,0],ecu.name+' · SESSION');
-   await sleep(140);
-   $('simpleStatus').textContent=ecu.name+' · '+label+'...';
-   await sendCan(ecu.tx,hliChannel(channel),ecu.name+' · '+label);
-   $('simpleStatus').textContent=label+' trimis către '+ecu.name+'.';
- }catch(e){
-   $('simpleStatus').textContent='Eroare '+label+': '+e.message;
- }finally{state.simpleBusy=false;update();}
+  if(!simpleGuard())return;
+  state.simpleBusy=true;update();
+  try{
+    if(state.usStyleActive){
+      $('simpleStatus').textContent='Oprire US Style pe ambele faruri...';
+      await simpleOemBoth();
+    }
+    const sides=simpleSides();
+    for(const ecu of sides){
+      $('simpleStatus').textContent=ecu.name+' · '+label+' exclusiv...';
+      await simpleStart(ecu);
+      await simpleOemEcu(ecu); // Release any previous CH1–CH6 overrides.
+      await simpleTx(ecu,hliExclusive(channel),label+' exclusiv CH'+channel+' ON, rest OFF');
+      if(channel===6)await simpleBlueIntensity(ecu,100);
+      await sleep(140);
+    }
+    state.usStyleActive=false;
+    $('simpleStatus').textContent=label+' exclusiv trimis către '+sides.map(x=>x.name).join(' + ')+'. CH4/CH5 comandate OFF. Verifică fizic și restaurează OEM înainte de deplasare.';
+  }catch(e){
+    $('simpleStatus').textContent='Eroare '+label+': '+e.message+'. Folosește OEM AMBELE pentru restaurare.';
+    log('LIGHT ERROR '+e.message);
+  }finally{state.simpleBusy=false;update();}
 }
 async function simpleBluePwm(percent){
- if(!state.connected||!state.txUnlocked||state.simpleBusy)return;
- if(![25,50,75,100].includes(percent))return;
- state.simpleBusy=true;update();
- const ecu=DIAG_ECUS[$('simpleSide').value];
- const pwm=percent & 0xFF;
- try{
-   $('simpleStatus').textContent=ecu.name+' · BLUE '+percent+'%: sesiune...';
-   await sendCan(ecu.tx,[0x02,0x10,0x03,0,0,0,0,0],ecu.name+' · SESSION');
-   await sleep(120);
-   // CH6 BLUE ON first, then apply HLI_Dimmung_einstellen_Control (IOID 0009).
-   await sendCan(ecu.tx,hliChannel(6),ecu.name+' · BLUE ON');
-   await sleep(100);
-   // UDS payload is 8 bytes: 2F 00 09 03 06 PWM FF FF.
-   // Classic CAN ISO-TP therefore uses FF + CF. HLI normally answers FC before CF;
-   // the fixed pause lets that FC arrive without forcing the user to press twice.
-   await sendCan(ecu.tx,[0x10,0x08,0x2F,0x00,0x09,0x03,0x06,pwm],ecu.name+' · BLUE '+percent+'% FF');
-   await sleep(140);
-   await sendCan(ecu.tx,[0x21,0xFF,0xFF,0,0,0,0,0],ecu.name+' · BLUE '+percent+'% CF');
-   $('simpleStatus').textContent='BLUE '+percent+'% trimis către '+ecu.name+'. Uită-te la intensitatea LED-ului.';
- }catch(e){
-   $('simpleStatus').textContent='Eroare BLUE '+percent+'%: '+e.message;
- }finally{state.simpleBusy=false;update();}
+  if(percent!==100)return;
+  return simpleSetColor(6,'BLUE 100%');
 }
 async function simpleReturnOem(){
- if(!state.connected||!state.txUnlocked||state.simpleBusy)return;
- state.simpleBusy=true;update();
- const ecu=DIAG_ECUS[$('simpleSide').value];
- try{
-   await sendCan(ecu.tx,[0x02,0x10,0x03,0,0,0,0,0],ecu.name+' · SESSION');
-   await sleep(120);
-   await sendCan(ecu.tx,[0x04,0x2F,0x00,0x08,0x00,0,0,0],ecu.name+' · OEM');
-   $('simpleStatus').textContent='Control OEM restaurat pe '+ecu.name+'.';
- }catch(e){$('simpleStatus').textContent='Eroare OEM: '+e.message;}
- finally{state.simpleBusy=false;update();}
+  if(!simpleReady())return;
+  state.simpleBusy=true;update();
+  try{
+    await simpleOemBoth();
+    $('simpleStatus').textContent='OEM trimis către AMBELE faruri. Verifică revenirea luminilor normale.';
+  }catch(e){$('simpleStatus').textContent='Eroare OEM: '+e.message+'. Verifică fizic farurile.';log('OEM ERROR '+e.message);}
+  finally{state.simpleBusy=false;update();}
+}
+async function simpleToggleUs(){
+  if(!simpleGuard())return;
+  state.simpleBusy=true;update();
+  const enabling=!state.usStyleActive;
+  try{
+    if(!enabling){
+      await simpleOemBoth();
+      $('simpleStatus').textContent='US Style dezactivat. OEM trimis către ambele faruri.';
+    }else{
+      // Reset all old overrides; then override ONLY the AMBER channel.
+      // All other channels remain OEM-controlled (not forced OFF).
+      await simpleOemBoth();
+      for(const ecu of [DIAG_ECUS.left,DIAG_ECUS.right]){
+        $('simpleStatus').textContent=ecu.name+' · US Style AMBER...';
+        await simpleStart(ecu);
+        await simpleTx(ecu,hliChannel(1),'US STYLE AMBER CH1');
+        await sleep(140);
+      }
+      state.usStyleActive=true;
+      $('simpleStatus').textContent='US Style AMBER trimis către ambele faruri. Testează semnalizările și revino OEM înainte de circulație.';
+    }
+  }catch(e){
+    state.usStyleActive=false;
+    $('simpleStatus').textContent='Eroare US Style: '+e.message+'. Revino OEM AMBELE.';
+    log('US STYLE ERROR '+e.message);
+  }finally{state.simpleBusy=false;update();}
 }
 async function captureWindow(durationMs,label){
  resetSession();
@@ -642,6 +701,8 @@ for(let n=1;n<=6;n++)$('ch'+n).addEventListener('click',()=>void runHli('CH'+n+'
 $('simpleAmber').addEventListener('click',()=>void simpleSetColor(1,'AMBER'));
 $('simpleWhite').addEventListener('click',()=>void simpleSetColor(2,'WHITE'));
 $('simpleBlue').addEventListener('click',()=>void simpleBluePwm(100));
+ $('simpleUs').addEventListener('click',()=>void simpleToggleUs());
+ $('simpleParked').addEventListener('change',update);
 $('simpleOem').addEventListener('click',()=>void simpleReturnOem());
 $('simpleScan').addEventListener('click',()=>void simpleScan());
 $('learnAccept').addEventListener('click',()=>void testAcceptCall());
