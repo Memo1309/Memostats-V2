@@ -67,6 +67,21 @@
     .us-btn.active { background:#67421b; border-color:#ffc46e; color:#fff3dc; }
     .safety-check { display:flex; gap:10px; align-items:flex-start; margin-top:13px; color:var(--muted); font-size:12px; line-height:1.55; }
     .safety-check input { flex:0 0 20px; width:20px; height:20px; margin-top:1px; }
+    .show-card { margin-top:18px; padding:16px; border:1px solid #425b70; background:linear-gradient(145deg,#152630,#111b29); border-radius:15px; }
+    .show-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}
+    .show-preview {padding:14px 10px 12px;text-align:center;border-radius:13px;border:1px solid #344654;background:#0c151e;}
+    .show-preview span {display:block;font-size:11px;color:var(--muted);margin-bottom:9px}
+    .lamp {height:32px;width:86%;margin:auto;border-radius:23px 23px 12px 12px;border:2px solid #465766;background:#25303a;transition:background .13s,box-shadow .13s}
+    .lamp[data-color=white] {background:#f6faff;box-shadow:0 0 20px 5px #e3f2ff77}
+    .lamp[data-color=amber] {background:#ffae3a;box-shadow:0 0 18px 5px #ff9b3290}
+    .lamp[data-color=blue] {background:#399cf6;box-shadow:0 0 21px 5px #349aff88}
+    .lamp[data-color=off] {background:#121c27;box-shadow:none}
+    .show-controls {display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}
+    .show-controls select {min-width:0;width:100%}
+    .show-actions {display:flex;gap:10px;margin-top:12px}
+    .show-actions button {flex:1}
+    .show-label {font-size:11px;font-weight:800;color:var(--muted);letter-spacing:.06em}
+    .show-caption {font-size:12px;color:var(--muted);line-height:1.5;margin-top:11px}
     .advanced-panel { display:none; }
     body.advanced .advanced-panel { display:block; }
     [hidden] { display:none !important; }
@@ -105,6 +120,27 @@
     <div class="between"><strong>US Style</strong><span class="eyebrow">AMBER · AMBELE FARURI</span></div>
     <p class="sub">CH1 AMBER activ pe ambele faruri; celelalte canale rămân sub controlul OEM. Nu garantează prioritatea semnalizărilor, care trebuie verificată separat în staționare.</p>
     <div class="row"><button id="simpleUs" class="us-btn" disabled>ACTIVEAZĂ US STYLE</button></div>
+    <div class="show-card">
+      <div class="between"><strong>Light Show · Strobe accent</strong><span class="eyebrow">CH1 · CH2 · CH6</span></div>
+      <p class="sub">Efecte reale prin BLE asupra LED-urilor AMBER, WHITE și BLUE. Faza scurtă/lungă (CH4/CH5) rămâne sub controlul OEM. Nu este stroboscop de fază lungă și nu folosește flash-uri rapide.</p>
+      <div class="show-grid">
+        <div class="show-preview"><span>FAR STÂNGA</span><div id="showLeftLamp" class="lamp" data-color="off"></div></div>
+        <div class="show-preview"><span>FAR DREAPTA</span><div id="showRightLamp" class="lamp" data-color="off"></div></div>
+      </div>
+      <div class="show-controls">
+        <div><label class="show-label" for="showPattern">JOC DE LUMINI</label><select id="showPattern">
+          <option value="strobe">PULSE STROBE</option>
+          <option value="alternating">ALTERNANȚĂ STÂNGA / DREAPTA</option>
+          <option value="colors">COLOR CHASE</option>
+        </select></div>
+        <div><label class="show-label" for="showSpeed">RITM</label><select id="showSpeed">
+          <option value="1200">LENT</option><option value="950" selected>MEDIU</option><option value="750">RAPID (LIMITAT)</option>
+        </select></div>
+      </div>
+      <div class="show-actions"><button id="showStart" class="primary" disabled>PORNEȘTE LIGHT SHOW</button><button id="showStop" class="stop" disabled>STOP + OEM</button></div>
+      <div id="showStatus" class="info">Inactiv. Durata maximă 12 secunde, apoi revenire OEM. Necesită confirmarea staționării de mai sus.</div>
+      <p class="show-caption">Siguranță: nu există încă anulare automată la semnalizare/avarii și browserul nu poate garanta restaurarea OEM dacă se deconectează. Test exclusiv în spațiu privat, nu în trafic.</p>
+    </div>
     <div class="line"></div>
     <div class="between"><strong>Buton fizic</strong><span class="eyebrow">ACCEPT CALL</span></div>
     <p class="sub">Test direct prin SCCM166. Aplicația citește DID 0x0160 cu butonul liber, apoi încă o dată când ții apăsat ACCEPT CALL și găsește automat byte-ul/bitul schimbat.</p>
@@ -177,7 +213,7 @@ const DIAG_ECUS={left:{name:'HLI_FL176',tx:0x76A,rx:0x4AD},right:{name:'HLI_FR17
 const $=id=>document.getElementById(id);
 let gattQueue=Promise.resolve();
 function gattExclusive(fn){const p=gattQueue.then(fn);gattQueue=p.catch(()=>{});return p;}
-const state={device:null,control:null,data:null,connected:false,capturing:false,dumping:false,txUnlocked:false,txChallenge:null,authPending:false,simpleBusy:false,usStyleActive:false,activeMode:null,activeSides:[],frames:[],status:{capturing:false,count:0,overwritten:0,dumping:false},timer:null,ticker:null,poller:null,startedAt:null,startedPerf:0,stoppedAt:null,markers:[],expected:null,endReceived:false,lostConnections:0,notificationErrors:0,downloadNotified:0,sequenceGaps:0,dumpOverwritten:null};
+const state={device:null,control:null,data:null,connected:false,capturing:false,dumping:false,txUnlocked:false,txChallenge:null,authPending:false,simpleBusy:false,usStyleActive:false,activeMode:null,activeSides:[],showRunning:false,showStopping:false,frames:[],status:{capturing:false,count:0,overwritten:0,dumping:false},timer:null,ticker:null,poller:null,startedAt:null,startedPerf:0,stoppedAt:null,markers:[],expected:null,endReceived:false,lostConnections:0,notificationErrors:0,downloadNotified:0,sequenceGaps:0,dumpOverwritten:null};
 function log(s){const node=$('log');node.textContent+=`[${new Date().toLocaleTimeString('ro-RO')}] ${s}\n`;node.scrollTop=node.scrollHeight;const lines=node.textContent.split('\n');if(lines.length>170)node.textContent=lines.slice(-120).join('\n');}
 function info(s,kind='normal'){const e=$('message');e.textContent=s;e.className='info'+(kind==='error'?' error':kind==='warn'?' warn':'');log(s);}
 function u32(b,i){return (b[i]|(b[i+1]<<8)|(b[i+2]<<16)|(b[i+3]<<24))>>>0;}
@@ -211,7 +247,11 @@ function update(){
   const parked=$('simpleParked').checked;
   $('activeLightMode').textContent='Mod selectat în aplicație: '+(state.activeMode||'OEM / necunoscut')+' (confirmarea HLI nu este disponibilă)';
   ['simpleAmber','simpleWhite','simpleBlue','simpleUs'].forEach(id=>$(id).disabled=!simpleReady||!parked);
-  $('simpleOem').disabled=!simpleReady;
+  $('simpleOem').disabled=(!simpleReady&&!state.showRunning)||!state.connected;
+  $('showStart').disabled=!simpleReady||!parked||state.showRunning;
+  $('showStop').disabled=!state.showRunning;
+  $('showPattern').disabled=state.showRunning;
+  $('showSpeed').disabled=state.showRunning;
   $('simpleUs').textContent=state.usStyleActive?'DEZACTIVEAZĂ US STYLE':'ACTIVEAZĂ US STYLE';
   $('simpleUs').classList.toggle('active',state.usStyleActive);
   $('simpleScan').disabled=!state.connected||state.simpleBusy||state.capturing||state.dumping;
@@ -219,7 +259,7 @@ function update(){
   if(state.connected&&!state.txUnlocked&&!state.authPending&&!state.simpleBusy)$('simpleStatus').textContent='Conectat. Se așteaptă deblocarea automată TX...';
 }
 function stopTimers(){clearTimeout(state.timer);state.timer=null;clearInterval(state.ticker);state.ticker=null;clearInterval(state.poller);state.poller=null;}
-function onDisconnect(){if(!state.connected&&!state.control&&!state.data)return;state.connected=false;state.control=null;state.data=null;state.txUnlocked=false;state.txChallenge=null;state.authPending=false;state.simpleBusy=false;state.usStyleActive=false;state.activeMode=null;state.activeSides=[];const wasActive=state.capturing||state.dumping;state.capturing=false;state.dumping=false;stopTimers();state.lostConnections++;state.stoppedAt=performance.now();info(wasActive?'BLE deconectat în timpul operațiunii: fișierul poate fi incomplet.':'Conexiunea BLE s-a închis.',wasActive?'error':'warn');update();}
+function onDisconnect(){if(!state.connected&&!state.control&&!state.data)return;state.connected=false;state.control=null;state.data=null;state.txUnlocked=false;state.txChallenge=null;state.authPending=false;state.simpleBusy=false;state.usStyleActive=false;state.activeMode=null;state.activeSides=[];if(state.showRunning)stopLightShow('Conexiune BLE pierdută');const wasActive=state.capturing||state.dumping;state.capturing=false;state.dumping=false;stopTimers();state.lostConnections++;state.stoppedAt=performance.now();info(wasActive?'BLE deconectat în timpul operațiunii: fișierul poate fi incomplet.':'Conexiunea BLE s-a închis.',wasActive?'error':'warn');update();}
 async function connect(){
  if(!('bluetooth' in navigator)){info('Web Bluetooth indisponibil. Deschide URL-ul HTTPS în Bluefy, nu în Safari.','error');return;}
  $('connect').disabled=true;
@@ -472,6 +512,7 @@ async function simpleBluePwm(percent){
   return simpleSetColor(6,'BLUE 100%');
 }
 async function simpleReturnOem(){
+  if(state.showRunning){stopLightShow('OEM solicitat');return;}
   if(!simpleReady())return;
   state.simpleBusy=true;update();
   try{
@@ -508,6 +549,109 @@ async function simpleToggleUs(){
     $('simpleStatus').textContent='Eroare US Style: '+e.message+'. Revino OEM AMBELE.';
     log('US STYLE ERROR '+e.message);
   }finally{state.simpleBusy=false;update();}
+}
+// Light show exclusively controls CH1/CH2/CH6. CH3/CH4/CH5 remain OEM-owned.
+ // Never use all-channel mask here, since CH4/CH5 may be driving lights.
+const SHOW_ACCENT_MASK=0x23; // CH1 amber (0x01), CH2 white (0x02), CH6 blue (0x20)
+const SHOW_CHANNEL={off:0,amber:0x01,white:0x02,blue:0x20};
+const SHOW_SCENES={
+  strobe:[['amber','amber'],['off','off'],['white','white'],['off','off'],['blue','blue'],['off','off']],
+  alternating:[['white','off'],['off','amber'],['blue','off'],['off','white'],['amber','off'],['off','blue']],
+  colors:[['white','white'],['amber','amber'],['blue','blue'],['off','off']]
+};
+const SHOW_LIMIT_MS=12000;
+let showToken=0;
+let showPromise=null;
+function showFrame(color){
+  return [0x06,0x2F,0x00,0x08,0x03,SHOW_CHANNEL[color],SHOW_ACCENT_MASK,0x00];
+}
+function showPreview(left='off',right='off'){
+  $('showLeftLamp').dataset.color=left;
+  $('showRightLamp').dataset.color=right;
+}
+function stopLightShow(reason='STOP'){
+  if(!state.showRunning)return;
+  showToken++;
+  state.showStopping=true;
+  $('showStatus').textContent=reason+'. Oprire secvență și restaurare OEM în curs...';
+  update();
+}
+async function showWait(duration,token){
+  const until=Date.now()+duration;
+  while(state.showRunning&&token===showToken&&Date.now()<until){
+    await sleep(Math.min(50,Math.max(1,until-Date.now())));
+  }
+}
+async function startLightShow(){
+  if(!simpleGuard()||state.showRunning)return;
+  if(state.capturing||state.dumping){
+    $('showStatus').textContent='Oprește captura CAN înainte să pornești Light Show.';
+    return;
+  }
+  const pattern=$('showPattern').value;
+  const scenes=SHOW_SCENES[pattern];
+  if(!scenes)return;
+  const speed=Number($('showSpeed').value);
+  if(![750,950,1200].includes(speed))return;
+  const token=++showToken;
+  state.showRunning=true;
+  state.showStopping=false;
+  state.simpleBusy=true;
+  state.activeMode='LIGHT SHOW '+pattern.toUpperCase();
+  state.activeSides=[DIAG_ECUS.left,DIAG_ECUS.right];
+  showPreview();
+  update();
+  showPromise=(async()=>{
+    let error=null;
+    try{
+      // Reset previously latched colors/US Style before starting the show.
+      await simpleOemBoth();
+      if(token===showToken&&state.showRunning){
+        await simpleStart(DIAG_ECUS.left);
+        await simpleStart(DIAG_ECUS.right);
+      }
+      if(token===showToken&&state.showRunning){
+        state.activeMode='LIGHT SHOW '+pattern.toUpperCase();
+        state.activeSides=[DIAG_ECUS.left,DIAG_ECUS.right];
+        const deadline=Date.now()+SHOW_LIMIT_MS;
+        let step=0;
+        while(state.showRunning&&token===showToken&&Date.now()<deadline){
+          const [left,right]=scenes[step++%scenes.length];
+          await simpleTx(DIAG_ECUS.left,showFrame(left),'SHOW '+left+' LEFT');
+          if(token!==showToken||!state.showRunning)break;
+          await sleep(125);
+          if(token!==showToken||!state.showRunning)break;
+          await simpleTx(DIAG_ECUS.right,showFrame(right),'SHOW '+right+' RIGHT');
+          showPreview(left,right);
+          $('showStatus').textContent='Rulează: '+pattern+' · '+left.toUpperCase()+' / '+right.toUpperCase()+' · max. 12 secunde.';
+          await showWait(speed,token);
+        }
+      }
+    }catch(e){error=e;log('LIGHT SHOW ERROR '+(e?.message||e));}
+    finally{
+      state.showStopping=true;
+      $('showStatus').textContent='Restaurare OEM pentru ambele faruri...';
+      showPreview();
+      try{
+        if(state.connected&&state.txUnlocked)await simpleOemBoth();
+        else throw Error('Conexiunea BLE/TX a fost pierdută');
+      }catch(e){
+        error=error||e;
+        log('LIGHT SHOW OEM FAIL '+(e?.message||e));
+      }
+      state.showRunning=false;
+      state.showStopping=false;
+      state.simpleBusy=false;
+      state.activeMode=null;
+      state.activeSides=[];
+      showPromise=null;
+      $('showStatus').textContent=error
+        ? 'ATENȚIE: '+(error?.message||error)+'. Revenirea OEM nu poate fi garantată. Verifică fizic farurile înainte de deplasare.'
+        : 'Light Show oprit. Comanda OEM a fost trimisă către ambele faruri; verifică fizic restaurarea.';
+      update();
+    }
+  })();
+  await showPromise;
 }
 // Keep the diagnostic session alive while the app is connected and a mode is latched.
  // This is not a safety interlock: mobile browsers may suspend background activity.
@@ -726,8 +870,15 @@ for(let n=1;n<=6;n++)$('ch'+n).addEventListener('click',()=>void runHli('CH'+n+'
 $('simpleAmber').addEventListener('click',()=>void simpleSetColor(1,'AMBER'));
 $('simpleWhite').addEventListener('click',()=>void simpleSetColor(2,'WHITE'));
 $('simpleBlue').addEventListener('click',()=>void simpleBluePwm(100));
+$('showStart').addEventListener('click',()=>void startLightShow());
+$('showStop').addEventListener('click',()=>stopLightShow('STOP manual'));
+$('showPattern').addEventListener('change',()=>showPreview());
+$('simpleParked').addEventListener('change',()=>{
+  if(!$('simpleParked').checked&&state.showRunning)stopLightShow('Staționarea nu mai este confirmată');
+  update();
+});
  $('simpleUs').addEventListener('click',()=>void simpleToggleUs());
- $('simpleParked').addEventListener('change',update);
+
 $('simpleOem').addEventListener('click',()=>void simpleReturnOem());
 $('simpleScan').addEventListener('click',()=>void simpleScan());
 $('learnAccept').addEventListener('click',()=>void testAcceptCall());
@@ -738,7 +889,8 @@ $('simpleAdvanced').addEventListener('click',()=>{
 $('authTx').addEventListener('click',()=>void beginBleAuth());
 $('capsTx').addEventListener('click',()=>void command(0x09));
 $('manualSend').addEventListener('click',()=>{try{const t=$('manualId').value.trim().replace(/^0x/i,'');if(!/^[0-9a-fA-F]+$/.test(t))throw Error('CAN ID invalid');const id=parseInt(t,16);const data=parseHexBytes($('manualData').value);void sendCan(id,data,'MANUAL',$('manualRtr').checked);}catch(e){$('diagResult').textContent='Eroare: '+e.message;$('diagResult').className='info error';}});
-window.addEventListener('pagehide',()=>{if(state.capturing||state.dumping)log('Atenție: pagina se închide în timpul capturii.');});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&state.showRunning)stopLightShow('Aplicația a trecut în fundal');});
+window.addEventListener('pagehide',()=>{if(state.showRunning)stopLightShow('Pagina a fost închisă');if(state.capturing||state.dumping)log('Atenție: pagina se închide în timpul capturii.');});
 log('Gata. Mod simplu activ. Conectează MBito-Sniffer.');update();
 </script>
 </body>
