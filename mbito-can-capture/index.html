@@ -90,7 +90,9 @@
 
   <section class="card simple-card">
     <div class="between"><h2>02. Control simplu</h2><span class="eyebrow">W176 HLI</span></div>
-    <p class="sub">Mod exclusiv: aprinde doar canalul selectat și comandă OFF pe celelalte CH1–CH6. Operațiile se fac secvențial prin HLI și pot afecta faza scurtă/lungă. Nu folosi pe drum.</p>
+    <p class="sub">Mod exclusiv experimental: canalul ales ON, restul CH1–CH6 OFF. Starea rămâne selectată în aplicație până la „OEM AMBELE”. Farurile pot închide sesiunea de diagnoză independent de aplicație.</p>
+    <div class="info warn">ATENȚIE: această versiune NU detectează încă semnalizarea sau avariile în timp real. Prioritatea automată OEM necesită firmware nou și identificarea semnalelor CAN. Nu circula cu mod exclusiv activ.</div>
+    <div class="info" id="activeLightMode">Mod selectat: OEM / neconfirmat</div>
     <div class="segment"><label for="simpleSide">Far</label><select id="simpleSide"><option value="both" selected>AMBELE</option><option value="left">STÂNGA</option><option value="right">DREAPTA</option></select></div>
     <label class="safety-check"><input id="simpleParked" type="checkbox">Confirm că vehiculul este staționat într-un spațiu privat și că înțeleg că modul exclusiv oprește inclusiv CH4 (fază scurtă) și CH5 (fază lungă).</label>
     <div class="simple-grid">
@@ -175,7 +177,7 @@ const DIAG_ECUS={left:{name:'HLI_FL176',tx:0x76A,rx:0x4AD},right:{name:'HLI_FR17
 const $=id=>document.getElementById(id);
 let gattQueue=Promise.resolve();
 function gattExclusive(fn){const p=gattQueue.then(fn);gattQueue=p.catch(()=>{});return p;}
-const state={device:null,control:null,data:null,connected:false,capturing:false,dumping:false,txUnlocked:false,txChallenge:null,authPending:false,simpleBusy:false,usStyleActive:false,frames:[],status:{capturing:false,count:0,overwritten:0,dumping:false},timer:null,ticker:null,poller:null,startedAt:null,startedPerf:0,stoppedAt:null,markers:[],expected:null,endReceived:false,lostConnections:0,notificationErrors:0,downloadNotified:0,sequenceGaps:0,dumpOverwritten:null};
+const state={device:null,control:null,data:null,connected:false,capturing:false,dumping:false,txUnlocked:false,txChallenge:null,authPending:false,simpleBusy:false,usStyleActive:false,activeMode:null,activeSides:[],frames:[],status:{capturing:false,count:0,overwritten:0,dumping:false},timer:null,ticker:null,poller:null,startedAt:null,startedPerf:0,stoppedAt:null,markers:[],expected:null,endReceived:false,lostConnections:0,notificationErrors:0,downloadNotified:0,sequenceGaps:0,dumpOverwritten:null};
 function log(s){const node=$('log');node.textContent+=`[${new Date().toLocaleTimeString('ro-RO')}] ${s}\n`;node.scrollTop=node.scrollHeight;const lines=node.textContent.split('\n');if(lines.length>170)node.textContent=lines.slice(-120).join('\n');}
 function info(s,kind='normal'){const e=$('message');e.textContent=s;e.className='info'+(kind==='error'?' error':kind==='warn'?' warn':'');log(s);}
 function u32(b,i){return (b[i]|(b[i+1]<<8)|(b[i+2]<<16)|(b[i+3]<<24))>>>0;}
@@ -207,6 +209,7 @@ function update(){
   $('authTx').textContent=state.txUnlocked?'TX DEBLOCAT':'DEBLOCHEAZĂ TX';
   const simpleReady=state.connected&&state.txUnlocked&&!state.simpleBusy&&!state.dumping;
   const parked=$('simpleParked').checked;
+  $('activeLightMode').textContent='Mod selectat în aplicație: '+(state.activeMode||'OEM / necunoscut')+' (confirmarea HLI nu este disponibilă)';
   ['simpleAmber','simpleWhite','simpleBlue','simpleUs'].forEach(id=>$(id).disabled=!simpleReady||!parked);
   $('simpleOem').disabled=!simpleReady;
   $('simpleUs').textContent=state.usStyleActive?'DEZACTIVEAZĂ US STYLE':'ACTIVEAZĂ US STYLE';
@@ -216,7 +219,7 @@ function update(){
   if(state.connected&&!state.txUnlocked&&!state.authPending&&!state.simpleBusy)$('simpleStatus').textContent='Conectat. Se așteaptă deblocarea automată TX...';
 }
 function stopTimers(){clearTimeout(state.timer);state.timer=null;clearInterval(state.ticker);state.ticker=null;clearInterval(state.poller);state.poller=null;}
-function onDisconnect(){if(!state.connected&&!state.control&&!state.data)return;state.connected=false;state.control=null;state.data=null;state.txUnlocked=false;state.txChallenge=null;state.authPending=false;state.simpleBusy=false;state.usStyleActive=false;const wasActive=state.capturing||state.dumping;state.capturing=false;state.dumping=false;stopTimers();state.lostConnections++;state.stoppedAt=performance.now();info(wasActive?'BLE deconectat în timpul operațiunii: fișierul poate fi incomplet.':'Conexiunea BLE s-a închis.',wasActive?'error':'warn');update();}
+function onDisconnect(){if(!state.connected&&!state.control&&!state.data)return;state.connected=false;state.control=null;state.data=null;state.txUnlocked=false;state.txChallenge=null;state.authPending=false;state.simpleBusy=false;state.usStyleActive=false;state.activeMode=null;state.activeSides=[];const wasActive=state.capturing||state.dumping;state.capturing=false;state.dumping=false;stopTimers();state.lostConnections++;state.stoppedAt=performance.now();info(wasActive?'BLE deconectat în timpul operațiunii: fișierul poate fi incomplet.':'Conexiunea BLE s-a închis.',wasActive?'error':'warn');update();}
 async function connect(){
  if(!('bluetooth' in navigator)){info('Web Bluetooth indisponibil. Deschide URL-ul HTTPS în Bluefy, nu în Safari.','error');return;}
  $('connect').disabled=true;
@@ -405,7 +408,7 @@ function hliChannel(n){const mask=1<<(n-1);return [0x06,0x2F,0x00,0x08,0x03,mask
 const HLI_SESSION=[0x02,0x10,0x03,0,0,0,0,0];
 const HLI_OEM=[0x04,0x2F,0x00,0x08,0x00,0,0,0];
 const HLI_ALL_MASK=0x3F;
-function hliExclusive(n){const on=1<<(n-1);return [0x06,0x2F,0x00,0x08,0x03,HLI_ALL_MASK,on,0x00];}
+function hliExclusive(n){const on=1<<(n-1);return [0x06,0x2F,0x00,0x08,0x03,on,HLI_ALL_MASK,0x00];}
 function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
 function simpleSides(){return $('simpleSide').value==='both'?[DIAG_ECUS.left,DIAG_ECUS.right]:[DIAG_ECUS[$('simpleSide').value]];}
 function simpleReady(){return state.connected&&state.txUnlocked&&!state.simpleBusy&&!state.dumping;}
@@ -427,6 +430,8 @@ async function simpleOemEcu(ecu){
 async function simpleOemBoth(){
   for(const ecu of [DIAG_ECUS.left,DIAG_ECUS.right]){await simpleStart(ecu);await simpleOemEcu(ecu);}
   state.usStyleActive=false;
+  state.activeMode=null;
+  state.activeSides=[];
 }
 async function simpleBlueIntensity(ecu,percent){
   const pwm=percent&0xFF;
@@ -454,7 +459,9 @@ async function simpleSetColor(channel,label){
       await sleep(140);
     }
     state.usStyleActive=false;
-    $('simpleStatus').textContent=label+' exclusiv trimis către '+sides.map(x=>x.name).join(' + ')+'. CH4/CH5 comandate OFF. Verifică fizic și restaurează OEM înainte de deplasare.';
+    state.activeMode=label+' EXCLUSIV';
+    state.activeSides=sides;
+    $('simpleStatus').textContent=label+' exclusiv trimis către '+sides.map(x=>x.name).join(' + ')+'. Mod păstrat până la OEM (doar cât permite sesiunea HLI). Semnalizarea/avariile NU îl anulează încă. Nu circula cu acest mod.';
   }catch(e){
     $('simpleStatus').textContent='Eroare '+label+': '+e.message+'. Folosește OEM AMBELE pentru restaurare.';
     log('LIGHT ERROR '+e.message);
@@ -492,7 +499,9 @@ async function simpleToggleUs(){
         await sleep(140);
       }
       state.usStyleActive=true;
-      $('simpleStatus').textContent='US Style AMBER trimis către ambele faruri. Testează semnalizările și revino OEM înainte de circulație.';
+      state.activeMode='US STYLE AMBER';
+      state.activeSides=[DIAG_ECUS.left,DIAG_ECUS.right];
+      $('simpleStatus').textContent='US Style AMBER trimis către ambele faruri. Semnalizarea/avariile NU anulează încă automat. Revino OEM înainte de circulație.';
     }
   }catch(e){
     state.usStyleActive=false;
@@ -500,6 +509,22 @@ async function simpleToggleUs(){
     log('US STYLE ERROR '+e.message);
   }finally{state.simpleBusy=false;update();}
 }
+// Keep the diagnostic session alive while the app is connected and a mode is latched.
+ // This is not a safety interlock: mobile browsers may suspend background activity.
+const HLI_TESTER_PRESENT=[0x02,0x3E,0x00,0,0,0,0,0];
+let hliKeepaliveBusy=false;
+async function simpleKeepalive(){
+  if(hliKeepaliveBusy||!state.connected||!state.txUnlocked||state.simpleBusy||state.dumping||!state.activeMode)return;
+  hliKeepaliveBusy=true;
+  try {
+    for(const ecu of state.activeSides){
+      if(!state.connected||!state.txUnlocked||state.simpleBusy||!state.activeMode)break;
+      await simpleTx(ecu,HLI_TESTER_PRESENT,'TESTER PRESENT');
+    }
+  }catch(e){log('HLI keepalive: '+(e?.message||e));}
+  finally{hliKeepaliveBusy=false;}
+}
+setInterval(()=>void simpleKeepalive(),1500);
 async function captureWindow(durationMs,label){
  resetSession();
  $('simpleStatus').textContent=label+' · capturez...';
