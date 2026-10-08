@@ -96,9 +96,9 @@
     <div class="row"><button id="simpleOem" disabled>REVINO OEM</button><button id="simpleScan" class="primary" disabled>SCAN CAN</button></div>
     <div class="line"></div>
     <div class="between"><strong>Buton fizic</strong><span class="eyebrow">ACCEPT CALL</span></div>
-    <p class="sub">Apasă o singură dată „ÎNVAȚĂ ACCEPT CALL”. Aplicația face baseline, apoi îți spune când să ții apăsat butonul de pe volan și compară automat cadrele CAN.</p>
-    <div class="row"><button id="learnAccept" class="primary" disabled>ÎNVAȚĂ ACCEPT CALL</button></div>
-    <div id="learnResult" class="info">Neînvățat încă.</div>
+    <p class="sub">Test direct prin SCCM166. Aplicația citește DID 0x0160 cu butonul liber, apoi încă o dată când ții apăsat ACCEPT CALL și găsește automat byte-ul/bitul schimbat.</p>
+    <div class="row"><button id="learnAccept" class="primary" disabled>TEST ACCEPT CALL</button></div>
+    <div id="learnResult" class="info">Netestat încă.</div>
     <div id="simpleStatus" class="info simple-status">Conectează dongle-ul. După conectare, TX se deblochează singur.</div>
     <div class="row"><button id="simpleAdvanced" class="ghost">MOD AVANSAT</button></div>
   </section>
@@ -470,62 +470,104 @@ async function simpleScan(){
    $('simpleStatus').textContent='SCAN eșuat: '+e.message;
  }finally{state.simpleBusy=false;update();}
 }
-function dominant(values){
- const m=new Map();
- for(const v of values)m.set(v,(m.get(v)||0)+1);
- let value=null,count=0;
- for(const pair of m){const v=pair[0],c=pair[1];if(c>count){value=v;count=c;}}
- return {value:value,count:count,ratio:values.length?count/values.length:0,unique:m.size};
-}
-function findButtonCandidates(base,pressed){
- const key=f=>f.id+':'+f.dlc;
- const gb=new Map(),gp=new Map();
- for(const f of base){const k=key(f);if(!gb.has(k))gb.set(k,[]);gb.get(k).push(f);}
- for(const f of pressed){const k=key(f);if(!gp.has(k))gp.set(k,[]);gp.get(k).push(f);}
- const out=[];
- for(const entry of gb){
-   const k=entry[0],bfs=entry[1],pfs=gp.get(k);
-   if(!pfs||bfs.length<2||pfs.length<2)continue;
-   const dlc=Math.min(bfs[0].dlc,pfs[0].dlc,8);
-   for(let i=0;i<dlc;i++){
-     const b=dominant(bfs.map(f=>f.data[i]??0));
-     const p=dominant(pfs.map(f=>f.data[i]??0));
-     if(b.value===p.value)continue;
-     if(b.unique>Math.max(4,bfs.length*0.45)||p.unique>Math.max(4,pfs.length*0.45))continue;
-     const stability=Math.min(b.ratio,p.ratio);
-     if(stability<0.55)continue;
-     const xor=(b.value^p.value)&0xFF;
-     const score=stability*100+Math.min(bfs.length,pfs.length)*0.2-(b.unique+p.unique);
-     out.push({id:bfs[0].id,byte:i,from:b.value,to:p.value,xor:xor,score:score,baseN:bfs.length,pressN:pfs.length,stability:stability});
+function extractUds0160(frames){
+ const rx=frames.filter(f=>f.id===0x484).sort((a,b)=>a.timestampMs-b.timestampMs);
+ for(let i=0;i<rx.length;i++){
+   const d=rx[i].data||[];
+   if(!d.length)continue;
+   const pci=(d[0]>>4)&0x0F;
+   if(pci===0){
+     const len=d[0]&0x0F;
+     const p=d.slice(1,1+len);
+     if(p.length>=3&&p[0]===0x62&&p[1]===0x01&&p[2]===0x60)return {payload:p,data:p.slice(3),multi:false};
+   }
+   if(pci===1&&d.length>=5){
+     const total=((d[0]&0x0F)<<8)|d[1];
+     let p=d.slice(2);
+     if(!(p.length>=3&&p[0]===0x62&&p[1]===0x01&&p[2]===0x60))continue;
+     let nextSeq=1;
+     for(let j=i+1;j<rx.length&&p.length<total;j++){
+       const c=rx[j].data||[];
+       if(!c.length||((c[0]>>4)&0x0F)!==2)continue;
+       const seq=c[0]&0x0F;
+       if(seq!==(nextSeq&0x0F))continue;
+       p=p.concat(c.slice(1));
+       nextSeq++;
+     }
+     p=p.slice(0,total);
+     if(p.length>=3)return {payload:p,data:p.slice(3),multi:true,total:total};
    }
  }
- return out.sort((a,b)=>b.score-a.score).slice(0,8);
+ const neg=rx.find(f=>{const d=f.data||[];return d.length>=4&&(d[0]>>4)===0&&d[2]===0x7F&&d[3]===0x22;});
+ if(neg)throw Error('SCCM a răspuns negativ la DID 0160: '+bytesHex(neg.data));
+ throw Error('nu am găsit răspuns 62 01 60 pe RX 0x484');
 }
-async function learnAcceptCall(){
- if(!state.connected||state.simpleBusy||state.capturing||state.dumping)return;
+async function readSccmSwitchState(label){
+ resetSession();
+ $('simpleStatus').textContent=label+' · citesc SCCM166...';
+ await command(0x01);
+ state.startedAt=new Date().toISOString();state.startedPerf=performance.now();state.capturing=true;
+ await sleep(35);
+ await sendCan(0x622,[0x02,0x10,0x03,0,0,0,0,0],'SCCM166 · SESSION 10 03');
+ await sleep(90);
+ await sendCan(0x622,[0x03,0x22,0x01,0x60,0,0,0,0],'SCCM166 · READ 0160');
+ // Dacă răspunsul e ISO-TP multi-frame, SCCM primește Flow Control. Dacă e single-frame, îl ignoră.
+ await sleep(18);
+ await sendCan(0x622,[0x30,0x00,0x00,0,0,0,0,0],'SCCM166 · FLOW CONTROL');
+ await sleep(220);
+ await command(0x02);
+ state.capturing=false;state.stoppedAt=performance.now();
+ await sleep(90);
+ state.frames=[];state.expected=null;state.endReceived=false;state.dumpOverwritten=null;state.downloadNotified=0;state.sequenceGaps=0;state.dumping=true;update();
+ await command(0x03);
+ const started=performance.now();
+ while(state.dumping&&performance.now()-started<8000)await sleep(100);
+ if(state.dumping){state.dumping=false;throw Error('transferul BLE s-a blocat la DUMP');}
+ const frames=state.frames.map(f=>({id:f.id,dlc:f.dlc,data:[...f.data],timestampMs:f.timestampMs}));
+ const uds=extractUds0160(frames);
+ log(label+' 0160 = '+bytesHex(uds.data));
+ return uds;
+}
+function changedBits(before,after){
+ const n=Math.min(before.length,after.length),out=[];
+ for(let i=0;i<n;i++){
+   const xor=(before[i]^after[i])&0xFF;
+   if(!xor)continue;
+   for(let bit=0;bit<8;bit++){
+     const mask=1<<bit;
+     if(xor&mask)out.push({byte:i,bit:bit,from:(before[i]&mask)?1:0,to:(after[i]&mask)?1:0,before:before[i],after:after[i],mask:mask});
+   }
+ }
+ return out;
+}
+async function testAcceptCall(){
+ if(!state.connected||!state.txUnlocked||state.simpleBusy||state.capturing||state.dumping)return;
  state.simpleBusy=true;update();
  const box=$('learnResult');
  try{
-   box.textContent='1/3 BASELINE: nu atinge niciun buton...';
-   const base=await captureWindow(450,'BASELINE');
-   for(let n=3;n>=1;n--){box.textContent='2/3 Pregătește ACCEPT CALL · '+n;await sleep(700);}
-   box.textContent='ACUM: ține apăsat ACCEPT CALL până spun STOP';
-   await sleep(150);
-   const pressed=await captureWindow(850,'ACCEPT CALL APĂSAT');
-   box.textContent='STOP. Analizez diferențele...';
-   const c=findButtonCandidates(base,pressed);
-   if(!c.length){
-     box.textContent='N-am găsit un candidat stabil. Repetă și ține ACCEPT CALL apăsat pe toată perioada ACUM.';
+   box.textContent='1/3 BASELINE: nu atinge ACCEPT CALL.';
+   const base=await readSccmSwitchState('BASELINE');
+   for(let n=3;n>=1;n--){box.textContent='2/3 Pregătește degetul pe ACCEPT CALL · '+n;await sleep(700);}
+   box.textContent='ACUM: ȚINE APĂSAT ACCEPT CALL și NU-I DA DRUMUL.';
+   await sleep(600);
+   const pressed=await readSccmSwitchState('ACCEPT CALL APĂSAT');
+   box.textContent='STOP. Poți elibera butonul. Compar...';
+   const diffs=changedBits(base.data,pressed.data);
+   const rising=diffs.filter(x=>x.from===0&&x.to===1);
+   const chosen=rising.length?rising:diffs;
+   if(!chosen.length){
+     box.textContent='Nu s-a schimbat niciun bit în DID 0160. Repetă testul și ține butonul apăsat până apare STOP.';
    }else{
-     const lines=c.map((x,i)=>(i+1)+'. ID '+hexId(x.id)+' · BYTE '+x.byte+' · '+hexByte(x.from)+' → '+hexByte(x.to)+' · XOR '+hexByte(x.xor)+' · stabil '+Math.round(x.stability*100)+'%');
-     box.textContent='Candidați ACCEPT CALL:\n'+lines.join('\n');
-     log('ACCEPT CALL candidates: '+JSON.stringify(c));
+     const lines=chosen.map((x,i)=>(i+1)+'. BYTE '+x.byte+' · BIT '+x.bit+' · '+hexByte(x.before)+' → '+hexByte(x.after)+' · MASK '+hexByte(x.mask));
+     const verdict=chosen.length===1?'ACCEPT CALL IDENTIFICAT':'S-au schimbat mai mulți biți; candidatul/candidații sunt mai jos';
+     box.textContent=verdict+'\n\nBASE: '+bytesHex(base.data)+'\nAPĂSAT: '+bytesHex(pressed.data)+'\n\n'+lines.join('\n');
+     log('ACCEPT CALL DID0160 diffs: '+JSON.stringify(chosen));
    }
-   $('simpleStatus').textContent='Învățare terminată. Candidații sunt afișați mai sus.';
+   $('simpleStatus').textContent='Test SCCM terminat.';
  }catch(e){
    state.capturing=false;state.dumping=false;
-   box.textContent='Învățare eșuată: '+e.message;
-   $('simpleStatus').textContent='Repetă ÎNVAȚĂ ACCEPT CALL.';
+   box.textContent='TEST ACCEPT CALL eșuat: '+e.message;
+   $('simpleStatus').textContent='Testul SCCM nu s-a terminat.';
  }finally{state.simpleBusy=false;update();}
 }
 function mark(){if(!state.capturing||state.startedAt===null)return;const elapsed=(performance.now()-state.startedPerf)/1000;const marker={event:'UNLOCK',elapsedSec:+elapsed.toFixed(3),at:new Date().toISOString()};state.markers.push(marker);log(`◆ MARKER UNLOCK +${elapsed.toFixed(3)} s`);info(`UNLOCK marcat la +${elapsed.toFixed(2)} s.`);}
@@ -588,7 +630,7 @@ $('simpleWhite').addEventListener('click',()=>void simpleSetColor(2,'WHITE'));
 $('simpleBlue').addEventListener('click',()=>void simpleBluePwm(100));
 $('simpleOem').addEventListener('click',()=>void simpleReturnOem());
 $('simpleScan').addEventListener('click',()=>void simpleScan());
-$('learnAccept').addEventListener('click',()=>void learnAcceptCall());
+$('learnAccept').addEventListener('click',()=>void testAcceptCall());
 $('simpleAdvanced').addEventListener('click',()=>{
  document.body.classList.toggle('advanced');
  $('simpleAdvanced').textContent=document.body.classList.contains('advanced')?'ASCUNDE MOD AVANSAT':'MOD AVANSAT';
