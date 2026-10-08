@@ -95,7 +95,19 @@
   </section>
 
   <section class="card">
-    <div class="between"><h2>03. Cadre CAN</h2><span id="listed" class="eyebrow">0 cadre</span></div>
+    <div class="between"><h2>03. TX CAN / HLI</h2><span class="eyebrow">BLE CMD 06</span></div>
+    <p class="sub">Pornește captura din secțiunea 02, apoi trimite requestul de aici. RX rămâne activ în paralel; după test apasă STOP + DESCARCĂ și răspunsul HLI apare în lista de cadre.</p>
+    <div class="segment"><label for="diagEcu">ECU</label><select id="diagEcu"><option value="left">HLI_FL176 · TX 76A / RX 4AD</option><option value="right">HLI_FR176 · TX 772 / RX 4AE</option></select></div>
+    <div class="row"><button id="diagSession" data-diag>SESSION 10 03</button><button id="diagOem" data-diag>OEM / RETURN</button><button id="diagGlobalOem" data-diag>GLOBAL OEM</button></div>
+    <div class="row"><button id="ch1" data-diag>CH1</button><button id="ch2" data-diag>CH2</button><button id="ch3" data-diag>CH3</button><button id="ch4" data-diag>CH4</button><button id="ch5" data-diag>CH5</button><button id="ch6" data-diag>CH6</button></div>
+    <div class="line"></div>
+    <div class="segment"><label for="manualId">CAN ID</label><input id="manualId" value="76A" autocomplete="off" spellcheck="false" style="flex:0 1 110px"><label for="manualData">DATE HEX</label><input id="manualData" value="02 10 03 00 00 00 00 00" autocomplete="off" spellcheck="false" style="flex:1 1 280px"></div>
+    <div class="row"><button id="manualSend" class="primary" data-diag>TRIMITE CADRUL</button></div>
+    <div id="diagResult" class="info">Conectează dongle-ul. Pentru citirea răspunsului, ține captura pornită în secțiunea 02.</div>
+  </section>
+
+  <section class="card">
+    <div class="between"><h2>04. Cadre CAN</h2><span id="listed" class="eyebrow">0 cadre</span></div>
     <input type="search" id="filter" placeholder="Filtrează după CAN ID sau date hex, ex. 622" spellcheck="false" />
     <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>#</th><th>TIMP</th><th>CAN ID</th><th>DLC</th><th>DATE HEX</th></tr></thead><tbody id="tbody"><tr><td colspan="5" class="muted">Nicio captură descărcată.</td></tr></tbody></table></div>
     <div class="row"><button id="txt" class="primary" disabled>COPY → TXT</button><button id="csv" disabled>EXPORT CSV</button><button id="json" disabled>EXPORT JSON</button><button id="clear" class="ghost" disabled>ȘTERGE SESIUNEA</button></div>
@@ -103,7 +115,7 @@
   </section>
 
   <section class="card"><div class="between"><h2>Jurnal conexiune</h2><span class="eyebrow">BLE · local</span></div><div class="log" id="log" aria-live="polite"></div></section>
-  <p class="notes">Doar monitorizare: firmware-ul folosește CAN <span class="pill">NORMAL / ACK</span> ca să confirme recepția cadrelor și să evite retransmisiile. Coada TX este dezactivată, iar firmware-ul nu apelează transmiterea CAN. Aplicația trimite doar comenzi GATT de control către dongle. Ține mașina staționată la testare. Pentru a înregistra animația completă fără pierderi, actualizarea firmware-ului este necesară.</p>
+  <p class="notes">Captura rămâne compatibilă cu protocolul FFF0/FFF1/FFF2 existent. Panoul TX folosește extensia BLE <span class="pill">CMD 0x06</span> pentru un singur cadru CAN; firmware-ul trebuie să aibă TX queue activă și handler pentru această comandă. Testează actuatorii doar cu mașina staționată.</p>
 </main>
 <script>
 'use strict';
@@ -111,6 +123,9 @@ const SERVICE='0000fff0-0000-1000-8000-00805f9b34fb';
 const CONTROL='0000fff1-0000-1000-8000-00805f9b34fb';
 const DATA='0000fff2-0000-1000-8000-00805f9b34fb';
 const MAX_FRAMES=4096;
+const CMD_TX_CAN=0x06;
+const PKT_TX_RESULT=0xA4;
+const DIAG_ECUS={left:{name:'HLI_FL176',tx:0x76A,rx:0x4AD},right:{name:'HLI_FR176',tx:0x772,rx:0x4AE}};
 const $=id=>document.getElementById(id);
 let gattQueue=Promise.resolve();
 function gattExclusive(fn){const p=gattQueue.then(fn);gattQueue=p.catch(()=>{});return p;}
@@ -141,6 +156,7 @@ function update(){
   const seconds=state.startedAt===null?0:((state.stoppedAt===null?performance.now():state.stoppedAt)-state.startedPerf)/1000;
   setText('elapsed',`${Math.max(0,seconds).toFixed(1)} s`);
   $('dumpnote').textContent=state.dumping?`Se descarcă: ${fmt(state.frames.length)} cadre... Nu închide Bluefy.`:state.endReceived?`DUMP complet: ${fmt(state.frames.length)}/${fmt(state.expected??0)} cadre. ${state.dumpOverwritten?'DATE SUPRASCRISE ÎN BUFFER.':''}`:'Datele sosesc prin BLE la descărcare, nu în timpul capturii.';
+  document.querySelectorAll('[data-diag]').forEach(b=>b.disabled=!state.connected||state.dumping);
 }
 function stopTimers(){clearTimeout(state.timer);state.timer=null;clearInterval(state.ticker);state.ticker=null;clearInterval(state.poller);state.poller=null;}
 function onDisconnect(){if(!state.connected&&!state.control&&!state.data)return;state.connected=false;state.control=null;state.data=null;const wasActive=state.capturing||state.dumping;state.capturing=false;state.dumping=false;stopTimers();state.lostConnections++;state.stoppedAt=performance.now();info(wasActive?'BLE deconectat în timpul operațiunii: fișierul poate fi incomplet.':'Conexiunea BLE s-a închis.',wasActive?'error':'warn');update();}
@@ -208,8 +224,17 @@ async function connect(){
  }
 }
 function disconnect(){try {state.device?.gatt?.disconnect();}catch(e){log('Deconectare: '+e.message);}if(state.connected)onDisconnect();}
-async function rawCommand(byte){if(!state.connected||!state.control)throw Error('MBito nu este conectat');const v=new Uint8Array([byte]);if(typeof state.control.writeValueWithResponse==='function')await state.control.writeValueWithResponse(v);else if(typeof state.control.writeValueWithoutResponse==='function')await state.control.writeValueWithoutResponse(v);else await state.control.writeValue(v);log('CMD '+hexByte(byte));}
+async function rawWrite(bytes){
+ if(!state.connected||!state.control)throw Error('MBito nu este conectat');
+ const v=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);
+ if(typeof state.control.writeValueWithResponse==='function')await state.control.writeValueWithResponse(v);
+ else if(typeof state.control.writeValueWithoutResponse==='function')await state.control.writeValueWithoutResponse(v);
+ else await state.control.writeValue(v);
+ log('BLE TX '+Array.from(v).map(hexByte).join(' '));
+}
+async function rawCommand(byte){return rawWrite(new Uint8Array([byte]));}
 async function command(byte){return gattExclusive(()=>rawCommand(byte));}
+async function commandPacket(bytes){return gattExclusive(()=>rawWrite(bytes));}
 async function requestStatus(){if(!state.connected)return;try{await gattExclusive(async()=>{const dv=state.data?await state.data.readValue():null;const b=dv?new Uint8Array(dv.buffer,dv.byteOffset,dv.byteLength).slice():null;if(b&&b[0]===0xA2)updateStatus(parsedStatus(b));});}catch(e){log('Status READ: '+e.message);}}
 function updateStatus(x){state.status=x;state.capturing=x.capturing||state.capturing&&!state.dumping;if(!x.capturing&&state.capturing){state.capturing=false;stopTimers();}update();}
 function onNotification(ev){const dv=ev.target?.value;if(!dv)return;const b=new Uint8Array(dv.buffer,dv.byteOffset,dv.byteLength).slice();try{
@@ -220,6 +245,14 @@ function onNotification(ev){const dv=ev.target?.value;if(!dv)return;const b=new 
     if(state.frames.length!==state.expected)info(`Descărcare INCOMPLETĂ: ${fmt(state.frames.length)}/${fmt(state.expected)} cadre.`, 'warn');
     else if(state.dumpOverwritten>0)info(`Descărcare completă (${fmt(state.frames.length)}), dar ${fmt(state.dumpOverwritten)} cadre vechi au fost suprascrise pe dongle.`, 'warn');
     else info(`Descărcare completă: ${fmt(state.frames.length)} cadre CAN.`, 'normal');render();update();break;}
+  case PKT_TX_RESULT: {
+    if(b.length<7)throw Error('A4 TX result incomplet');
+    const ok=b[1]===0,id=u32(b,2),dlc=b[6];
+    log('A4 TX '+(ok?'OK':'FAIL')+' ID='+hexId(id)+' DLC='+dlc);
+    $('diagResult').textContent=(ok?'TX CAN reușit: ':'TX CAN eșuat: ')+hexId(id)+' DLC '+dlc;
+    $('diagResult').className=ok?'info':'info error';
+    break;
+  }
   default:log('Pachet necunoscut: '+Array.from(b).map(hexByte).join(' '));
  }
  }catch(e){state.notificationErrors++;log('Notificare invalidă: '+e.message);} }
@@ -239,6 +272,31 @@ async function dump(){if(state.capturing){info('Oprește captura înainte de DUM
  // Firmware-ul nu trimite răspuns dacă dump este refuzat. Avertizare după 45 s, fără a elimina datele.
  setTimeout(()=>{if(state.dumping){info('DUMP încă în curs. Dacă nu sosesc cadre sau A3, verifică BLE/Notify; nu șterge sesiunea.','warn');}},45000);
  }catch(e){state.dumping=false;info('DUMP eșuat: '+e.message,'error');update();}}
+function parseHexBytes(text){
+ const parts=text.trim().split(/[\\s,;:-]+/).filter(Boolean);
+ if(!parts.length)throw Error('Nu ai introdus date CAN');
+ const out=parts.map(x=>{if(!/^[0-9a-fA-F]{1,2}$/.test(x))throw Error('Byte invalid: '+x);return parseInt(x,16);});
+ if(out.length>8)throw Error('Un cadru CAN clasic are maximum 8 bytes');
+ return out;
+}
+function buildTxPacket(id,data){
+ if(!Number.isInteger(id)||id<0||id>0x1FFFFFFF)throw Error('CAN ID invalid');
+ const p=new Uint8Array(15);
+ p[0]=CMD_TX_CAN;p[1]=id>0x7FF?1:0;
+ p[2]=id&0xFF;p[3]=(id>>>8)&0xFF;p[4]=(id>>>16)&0xFF;p[5]=(id>>>24)&0xFF;
+ p[6]=data.length;
+ for(let i=0;i<data.length;i++)p[7+i]=data[i];
+ return p;
+}
+async function sendCan(id,data,label){
+ try{
+  await commandPacket(buildTxPacket(id,data));
+  $('diagResult').textContent=label+' trimis: '+hexId(id)+'  '+bytesHex(data)+(state.capturing?' | RX este în captură.':' | ATENȚIE: captura nu este pornită.');
+  $('diagResult').className=state.capturing?'info':'info warn';
+ }catch(e){$('diagResult').textContent='TX eșuat: '+e.message;$('diagResult').className='info error';log('TX: '+e.message);}
+}
+function runHli(label,data){const ecu=DIAG_ECUS[$('diagEcu').value];return sendCan(ecu.tx,data,ecu.name+' · '+label);}
+function hliChannel(n){const mask=1<<(n-1);return [0x06,0x2F,0x00,0x08,0x03,mask,mask,0x00];}
 function mark(){if(!state.capturing||state.startedAt===null)return;const elapsed=(performance.now()-state.startedPerf)/1000;const marker={event:'UNLOCK',elapsedSec:+elapsed.toFixed(3),at:new Date().toISOString()};state.markers.push(marker);log(`◆ MARKER UNLOCK +${elapsed.toFixed(3)} s`);info(`UNLOCK marcat la +${elapsed.toFixed(2)} s.`);}
 function bytesHex(arr){return arr.map(hexByte).join(' ');}
 function render(){const filter=$('filter').value.trim().toUpperCase().replace(/^0X/,'');const frames=state.frames.filter(f=>!filter||hexId(f.id).includes(filter)||bytesHex(f.data).includes(filter));setText('listed',`${fmt(frames.length)} / ${fmt(state.frames.length)} cadre`);const tbody=$('tbody');tbody.replaceChildren();if(!frames.length){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=5;td.textContent=state.frames.length?'Niciun rezultat.':'Nicio captură descărcată.';tr.append(td);tbody.append(tr);return;}
@@ -290,6 +348,11 @@ async function saveTxt(){
 function exportData(kind){if(!hasData())return;const name='mbito-can-'+new Date().toISOString().replace(/[:.]/g,'-');const base=state.frames[0].timestampMs;const frames=state.frames.map((f,i)=>({...f,index:i+1,relMs:f.timestampMs-base,idHex:hexId(f.id),dataHex:bytesHex(f.data)}));if(kind==='json'){download(JSON.stringify({...details(),frames},null,2),name+'.json','application/json');return;}
  const q=s=>'"'+String(s??'').replaceAll('"','""')+'"';const rows=[['index','timestamp_ms','relative_ms','can_id_hex','extended','rtr','dlc','data_hex','seq8'].join(',')];for(const f of frames)rows.push([f.index,f.timestampMs,f.relMs,f.idHex,f.extended?1:0,f.rtr?1:0,f.dlc,q(f.dataHex),f.seq8].join(','));download(rows.join('\r\n'),name+'.csv','text/csv;charset=utf-8');}
 $('connect').addEventListener('click',()=>void connect());$('disconnect').addEventListener('click',disconnect);$('start').addEventListener('click',()=>void start());$('stop').addEventListener('click',()=>void stop());$('dump').addEventListener('click',()=>void dump());$('status').addEventListener('click',()=>void requestStatus());$('mark').addEventListener('click',mark);$('txt').addEventListener('click',()=>void saveTxt());$('csv').addEventListener('click',()=>exportData('csv'));$('json').addEventListener('click',()=>exportData('json'));$('clear').addEventListener('click',()=>{if(confirm('Ștergi captura din memoria aplicației?'))resetSession();});$('filter').addEventListener('input',render);
+$('diagSession').addEventListener('click',()=>void runHli('SESSION 10 03',[0x02,0x10,0x03,0,0,0,0,0]));
+$('diagOem').addEventListener('click',()=>void runHli('OEM / RETURN',[0x04,0x2F,0x00,0x08,0x00,0,0,0]));
+$('diagGlobalOem').addEventListener('click',()=>void runHli('GLOBAL OEM',[0x04,0x2F,0x00,0xFF,0x00,0,0,0]));
+for(let n=1;n<=6;n++)$('ch'+n).addEventListener('click',()=>void runHli('CH'+n+' ON',hliChannel(n)));
+$('manualSend').addEventListener('click',()=>{try{const t=$('manualId').value.trim().replace(/^0x/i,'');if(!/^[0-9a-fA-F]+$/.test(t))throw Error('CAN ID invalid');const id=parseInt(t,16);const data=parseHexBytes($('manualData').value);void sendCan(id,data,'MANUAL');}catch(e){$('diagResult').textContent='Eroare: '+e.message;$('diagResult').className='info error';}});
 window.addEventListener('pagehide',()=>{if(state.capturing||state.dumping)log('Atenție: pagina se închide în timpul capturii.');});
 log('Gata. Deschide în Bluefy și conectează MBito-Sniffer.');update();
 </script>
