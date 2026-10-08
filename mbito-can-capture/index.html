@@ -94,6 +94,11 @@
       <button id="simpleBlue" class="blue-btn" disabled>BLUE 100%</button>
     </div>
     <div class="row"><button id="simpleOem" disabled>REVINO OEM</button><button id="simpleScan" class="primary" disabled>SCAN CAN</button></div>
+    <div class="line"></div>
+    <div class="between"><strong>Buton fizic</strong><span class="eyebrow">ACCEPT CALL</span></div>
+    <p class="sub">Apasă o singură dată „ÎNVAȚĂ ACCEPT CALL”. Aplicația face baseline, apoi îți spune când să ții apăsat butonul de pe volan și compară automat cadrele CAN.</p>
+    <div class="row"><button id="learnAccept" class="primary" disabled>ÎNVAȚĂ ACCEPT CALL</button></div>
+    <div id="learnResult" class="info">Neînvățat încă.</div>
     <div id="simpleStatus" class="info simple-status">Conectează dongle-ul. După conectare, TX se deblochează singur.</div>
     <div class="row"><button id="simpleAdvanced" class="ghost">MOD AVANSAT</button></div>
   </section>
@@ -194,6 +199,7 @@ function update(){
   const simpleReady=state.connected&&state.txUnlocked&&!state.simpleBusy&&!state.dumping;
   ['simpleAmber','simpleWhite','simpleBlue','simpleOem'].forEach(id=>$(id).disabled=!simpleReady);
   $('simpleScan').disabled=!state.connected||state.simpleBusy||state.capturing||state.dumping;
+  $('learnAccept').disabled=!state.connected||state.simpleBusy||state.capturing||state.dumping;
   if(state.connected&&!state.txUnlocked&&!state.authPending&&!state.simpleBusy)$('simpleStatus').textContent='Conectat. Se așteaptă deblocarea automată TX...';
 }
 function stopTimers(){clearTimeout(state.timer);state.timer=null;clearInterval(state.ticker);state.ticker=null;clearInterval(state.poller);state.poller=null;}
@@ -435,34 +441,91 @@ async function simpleReturnOem(){
  }catch(e){$('simpleStatus').textContent='Eroare OEM: '+e.message;}
  finally{state.simpleBusy=false;update();}
 }
+async function captureWindow(durationMs,label){
+ resetSession();
+ $('simpleStatus').textContent=label+' · capturez...';
+ await command(0x01);
+ state.startedAt=new Date().toISOString();state.startedPerf=performance.now();state.capturing=true;
+ await sleep(durationMs);
+ await command(0x02);
+ state.capturing=false;state.stoppedAt=performance.now();
+ await sleep(100);
+ state.frames=[];state.expected=null;state.endReceived=false;state.dumpOverwritten=null;state.downloadNotified=0;state.sequenceGaps=0;state.dumping=true;update();
+ await command(0x03);
+ $('simpleStatus').textContent=label+' · descarc...';
+ const started=performance.now();
+ while(state.dumping && performance.now()-started<8000) await sleep(100);
+ if(state.dumping){state.dumping=false;throw Error('transferul BLE s-a blocat la DUMP');}
+ return state.frames.map(f=>({id:f.id,dlc:f.dlc,data:[...f.data],timestampMs:f.timestampMs}));
+}
 async function simpleScan(){
  if(!state.connected||state.simpleBusy||state.capturing||state.dumping)return;
  state.simpleBusy=true;update();
  try{
-   resetSession();
-   $('simpleStatus').textContent='Scanez CAN...';
-   await command(0x01);
-   state.startedAt=new Date().toISOString();state.startedPerf=performance.now();state.capturing=true;
-   await sleep(150);
-   await command(0x02);
-   state.capturing=false;state.stoppedAt=performance.now();
-   await sleep(120);
-   state.frames=[];state.expected=null;state.endReceived=false;state.dumpOverwritten=null;state.downloadNotified=0;state.sequenceGaps=0;state.dumping=true;update();
-   await command(0x03);
-   $('simpleStatus').textContent='Descarc scanarea...';
-   const started=performance.now();
-   while(state.dumping && performance.now()-started<5000) await sleep(100);
-   if(state.dumping){
-     state.dumping=false;
-     $('simpleStatus').textContent='Captura există în dongle, dar transferul BLE s-a blocat. Mai apasă o dată SCAN CAN.';
-     info('DUMP simplu timeout după 5 s. Captura CAN există în dongle, dar notificările BLE nu au ajuns complet.','warn');
-   }else{
-     $('simpleStatus').textContent='SCAN gata: '+state.frames.length+' cadre descărcate.';
-     render();
-   }
+   const frames=await captureWindow(180,'SCAN CAN');
+   $('simpleStatus').textContent='SCAN gata: '+frames.length+' cadre descărcate.';
+   render();
  }catch(e){
    state.capturing=false;state.dumping=false;
    $('simpleStatus').textContent='SCAN eșuat: '+e.message;
+ }finally{state.simpleBusy=false;update();}
+}
+function dominant(values){
+ const m=new Map();
+ for(const v of values)m.set(v,(m.get(v)||0)+1);
+ let value=null,count=0;
+ for(const pair of m){const v=pair[0],c=pair[1];if(c>count){value=v;count=c;}}
+ return {value:value,count:count,ratio:values.length?count/values.length:0,unique:m.size};
+}
+function findButtonCandidates(base,pressed){
+ const key=f=>f.id+':'+f.dlc;
+ const gb=new Map(),gp=new Map();
+ for(const f of base){const k=key(f);if(!gb.has(k))gb.set(k,[]);gb.get(k).push(f);}
+ for(const f of pressed){const k=key(f);if(!gp.has(k))gp.set(k,[]);gp.get(k).push(f);}
+ const out=[];
+ for(const entry of gb){
+   const k=entry[0],bfs=entry[1],pfs=gp.get(k);
+   if(!pfs||bfs.length<2||pfs.length<2)continue;
+   const dlc=Math.min(bfs[0].dlc,pfs[0].dlc,8);
+   for(let i=0;i<dlc;i++){
+     const b=dominant(bfs.map(f=>f.data[i]??0));
+     const p=dominant(pfs.map(f=>f.data[i]??0));
+     if(b.value===p.value)continue;
+     if(b.unique>Math.max(4,bfs.length*0.45)||p.unique>Math.max(4,pfs.length*0.45))continue;
+     const stability=Math.min(b.ratio,p.ratio);
+     if(stability<0.55)continue;
+     const xor=(b.value^p.value)&0xFF;
+     const score=stability*100+Math.min(bfs.length,pfs.length)*0.2-(b.unique+p.unique);
+     out.push({id:bfs[0].id,byte:i,from:b.value,to:p.value,xor:xor,score:score,baseN:bfs.length,pressN:pfs.length,stability:stability});
+   }
+ }
+ return out.sort((a,b)=>b.score-a.score).slice(0,8);
+}
+async function learnAcceptCall(){
+ if(!state.connected||state.simpleBusy||state.capturing||state.dumping)return;
+ state.simpleBusy=true;update();
+ const box=$('learnResult');
+ try{
+   box.textContent='1/3 BASELINE: nu atinge niciun buton...';
+   const base=await captureWindow(450,'BASELINE');
+   for(let n=3;n>=1;n--){box.textContent='2/3 Pregătește ACCEPT CALL · '+n;await sleep(700);}
+   box.textContent='ACUM: ține apăsat ACCEPT CALL până spun STOP';
+   await sleep(150);
+   const pressed=await captureWindow(850,'ACCEPT CALL APĂSAT');
+   box.textContent='STOP. Analizez diferențele...';
+   const c=findButtonCandidates(base,pressed);
+   if(!c.length){
+     box.textContent='N-am găsit un candidat stabil. Repetă și ține ACCEPT CALL apăsat pe toată perioada ACUM.';
+   }else{
+     const lines=c.map((x,i)=>(i+1)+'. ID '+hexId(x.id)+' · BYTE '+x.byte+' · '+hexByte(x.from)+' → '+hexByte(x.to)+' · XOR '+hexByte(x.xor)+' · stabil '+Math.round(x.stability*100)+'%');
+     box.textContent='Candidați ACCEPT CALL:\n'+lines.join('\n');
+     log('ACCEPT CALL candidates: '+JSON.stringify(c));
+   }
+   $('simpleStatus').textContent='Învățare terminată. Candidații sunt afișați mai sus.';
+ }catch(e){
+   state.capturing=false;state.dumping=false;
+   box.textContent='Învățare eșuată: '+e.message;
+   $('simpleStatus').textContent='Repetă ÎNVAȚĂ ACCEPT CALL.';
  }finally{state.simpleBusy=false;update();}
 }
 function mark(){if(!state.capturing||state.startedAt===null)return;const elapsed=(performance.now()-state.startedPerf)/1000;const marker={event:'UNLOCK',elapsedSec:+elapsed.toFixed(3),at:new Date().toISOString()};state.markers.push(marker);log(`◆ MARKER UNLOCK +${elapsed.toFixed(3)} s`);info(`UNLOCK marcat la +${elapsed.toFixed(2)} s.`);}
@@ -525,6 +588,7 @@ $('simpleWhite').addEventListener('click',()=>void simpleSetColor(2,'WHITE'));
 $('simpleBlue').addEventListener('click',()=>void simpleBluePwm(100));
 $('simpleOem').addEventListener('click',()=>void simpleReturnOem());
 $('simpleScan').addEventListener('click',()=>void simpleScan());
+$('learnAccept').addEventListener('click',()=>void learnAcceptCall());
 $('simpleAdvanced').addEventListener('click',()=>{
  document.body.classList.toggle('advanced');
  $('simpleAdvanced').textContent=document.body.classList.contains('advanced')?'ASCUNDE MOD AVANSAT':'MOD AVANSAT';
