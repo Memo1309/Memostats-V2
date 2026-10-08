@@ -82,6 +82,13 @@
     .show-actions button {flex:1}
     .show-label {font-size:11px;font-weight:800;color:var(--muted);letter-spacing:.06em}
     .show-caption {font-size:12px;color:var(--muted);line-height:1.5;margin-top:11px}
+    .beam-lanes {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:14px}
+    .beam-lane {padding:10px 6px;border:1px solid #354351;border-radius:12px;background:#0d1722;text-align:center}
+    .beam-lane strong {display:block;font-size:12px;color:#c5d4df}
+    .beam-lane span {display:block;margin:8px auto 0;border-radius:99px;padding:7px 4px;max-width:90px;border:1px solid #4b5966;color:#93a5b4;font-size:11px;font-weight:800}
+    .beam-lane[data-active="yes"] span {background:#e4eaf0;color:#101924;box-shadow:0 0 0 2px #e4eaf044}
+    .beam-plan {margin-top:11px;font:12px/1.65 ui-monospace,Menlo,Consolas,monospace;color:#d1e4ef}
+    .beam-note {color:#ffdb99;font-size:12px;line-height:1.55;margin-top:13px}
     .advanced-panel { display:none; }
     body.advanced .advanced-panel { display:block; }
     [hidden] { display:none !important; }
@@ -140,6 +147,24 @@
       <div class="show-actions"><button id="showStart" class="primary" disabled>PORNEȘTE LIGHT SHOW</button><button id="showStop" class="stop" disabled>STOP + OEM</button></div>
       <div id="showStatus" class="info">Inactiv. Durata maximă 12 secunde, apoi revenire OEM. Necesită confirmarea staționării de mai sus.</div>
       <p class="show-caption">Siguranță: nu există încă anulare automată la semnalizare/avarii și browserul nu poate garanta restaurarea OEM dacă se deconectează. Test exclusiv în spațiu privat, nu în trafic.</p>
+    </div>
+    <div class="show-card" id="beamShowPanel">
+      <div class="between"><strong>Ultra Strobe · CH3 / CH4 / CH5</strong><span class="eyebrow">PREVIZUALIZARE</span></div>
+      <p class="sub">Proiect pentru stroboscop rapid pe celelalte canale. Configurezi succesiunea și intervalul, apoi vezi fiecare pas. <b>Nu transmite comenzi CAN către farurile principale.</b></p>
+      <div class="show-controls">
+        <div><label class="show-label" for="beamPattern">SECVENȚĂ</label>
+          <select id="beamPattern"><option value="alternate">CH4 ↔ CH5 ↔ OFF</option><option value="cascade">CH3 → CH4 → CH5 → OFF</option><option value="together">CH3+CH4+CH5 ↔ OFF</option></select></div>
+        <div><label class="show-label" for="beamInterval">INTERVAL PROIECTAT</label>
+          <select id="beamInterval"><option value="60">60 ms</option><option value="100" selected>100 ms</option><option value="150">150 ms</option></select></div>
+      </div>
+      <div class="beam-lanes">
+        <div class="beam-lane" id="beamCh3" data-active="no"><strong>CH3</strong><span>OFF</span></div>
+        <div class="beam-lane" id="beamCh4" data-active="no"><strong>CH4</strong><span>OFF</span></div>
+        <div class="beam-lane" id="beamCh5" data-active="no"><strong>CH5</strong><span>OFF</span></div>
+      </div>
+      <div id="beamPlan" class="beam-plan" aria-live="polite">Selectează o secvență și apasă PASUL URMĂTOR.</div>
+      <div class="show-actions"><button id="beamNext" class="primary">PASUL URMĂTOR</button><button id="beamReset" class="ghost">RESETEAZĂ</button></div>
+      <p class="beam-note">Controlul fizic super rapid necesită o comandă BLE nouă și logică locală în firmware: STOP imediat, limită de durată și anulare la semnalizare/avarii. Aceste verificări nu există încă. Nu există un buton de activare reală pe mașină.</p>
     </div>
     <div class="line"></div>
     <div class="between"><strong>Buton fizic</strong><span class="eyebrow">ACCEPT CALL</span></div>
@@ -550,6 +575,34 @@ async function simpleToggleUs(){
     log('US STYLE ERROR '+e.message);
   }finally{state.simpleBusy=false;update();}
 }
+// Preview-only choreography for CH3 / CH4 / CH5. Deliberately no CAN TX.
+const BEAM_PATTERN_FRAMES={
+  alternate:[0x08,0x10,0x00],
+  cascade:[0x04,0x08,0x10,0x00],
+  together:[0x1C,0x00]
+};
+let beamPreviewStep=-1;
+function drawBeamStep(mask){
+  for(const [ch,bit] of [[3,0x04],[4,0x08],[5,0x10]]){
+    const el=$('beamCh'+ch),active=(mask&bit)!==0;
+    el.dataset.active=active?'yes':'no';
+    el.querySelector('span').textContent=active?'ON':'OFF';
+  }
+}
+function beamResetPreview(){
+  beamPreviewStep=-1;
+  drawBeamStep(0);
+  const arr=BEAM_PATTERN_FRAMES[$('beamPattern').value]||[];
+  $('beamPlan').textContent='Model: '+arr.map(n=>'0x'+hexByte(n)).join(' → ')+' · '+$('beamInterval').value+' ms/pas. PREVIEW, fără CAN TX.';
+}
+function beamPreviewNext(){
+  const arr=BEAM_PATTERN_FRAMES[$('beamPattern').value];
+  if(!arr)return;
+  beamPreviewStep=(beamPreviewStep+1)%arr.length;
+  const mask=arr[beamPreviewStep];
+  drawBeamStep(mask);
+  $('beamPlan').textContent='Pas '+(beamPreviewStep+1)+'/'+arr.length+' · mască CH3–CH5 0x'+hexByte(mask)+' · '+$('beamInterval').value+' ms/pas · SIMULARE, fără CAN TX.';
+}
 // Light show exclusively controls CH1/CH2/CH6. CH3/CH4/CH5 remain OEM-owned.
  // Never use all-channel mask here, since CH4/CH5 may be driving lights.
 const SHOW_ACCENT_MASK=0x23; // CH1 amber (0x01), CH2 white (0x02), CH6 blue (0x20)
@@ -873,6 +926,10 @@ $('simpleBlue').addEventListener('click',()=>void simpleBluePwm(100));
 $('showStart').addEventListener('click',()=>void startLightShow());
 $('showStop').addEventListener('click',()=>stopLightShow('STOP manual'));
 $('showPattern').addEventListener('change',()=>showPreview());
+$('beamNext').addEventListener('click',beamPreviewNext);
+$('beamReset').addEventListener('click',beamResetPreview);
+$('beamPattern').addEventListener('change',beamResetPreview);
+$('beamInterval').addEventListener('change',beamResetPreview);
 $('simpleParked').addEventListener('change',()=>{
   if(!$('simpleParked').checked&&state.showRunning)stopLightShow('Staționarea nu mai este confirmată');
   update();
@@ -891,6 +948,7 @@ $('capsTx').addEventListener('click',()=>void command(0x09));
 $('manualSend').addEventListener('click',()=>{try{const t=$('manualId').value.trim().replace(/^0x/i,'');if(!/^[0-9a-fA-F]+$/.test(t))throw Error('CAN ID invalid');const id=parseInt(t,16);const data=parseHexBytes($('manualData').value);void sendCan(id,data,'MANUAL',$('manualRtr').checked);}catch(e){$('diagResult').textContent='Eroare: '+e.message;$('diagResult').className='info error';}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&state.showRunning)stopLightShow('Aplicația a trecut în fundal');});
 window.addEventListener('pagehide',()=>{if(state.showRunning)stopLightShow('Pagina a fost închisă');if(state.capturing||state.dumping)log('Atenție: pagina se închide în timpul capturii.');});
+beamResetPreview();
 log('Gata. Mod simplu activ. Conectează MBito-Sniffer.');update();
 </script>
 </body>
