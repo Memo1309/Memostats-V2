@@ -91,15 +91,7 @@
     <div class="simple-grid">
       <button id="simpleAmber" class="amber-btn" disabled>AMBER</button>
       <button id="simpleWhite" class="white-btn" disabled>WHITE</button>
-      <button id="simpleBlue" class="blue-btn" disabled>BLUE</button>
-    </div>
-    <div class="line"></div>
-    <div class="between"><strong>Intensitate BLUE</strong><span class="eyebrow">CH6 · DIMMING</span></div>
-    <div class="row">
-      <button id="blue25" data-simple-blue disabled>25%</button>
-      <button id="blue50" data-simple-blue disabled>50%</button>
-      <button id="blue75" data-simple-blue disabled>75%</button>
-      <button id="blue100" data-simple-blue disabled>100%</button>
+      <button id="simpleBlue" class="blue-btn" disabled>BLUE 100%</button>
     </div>
     <div class="row"><button id="simpleOem" disabled>REVINO OEM</button><button id="simpleScan" class="primary" disabled>SCAN CAN</button></div>
     <div id="simpleStatus" class="info simple-status">Conectează dongle-ul. După conectare, TX se deblochează singur.</div>
@@ -200,7 +192,7 @@ function update(){
   document.querySelectorAll('[data-auth]').forEach(b=>b.disabled=!state.connected||state.dumping);
   $('authTx').textContent=state.txUnlocked?'TX DEBLOCAT':'DEBLOCHEAZĂ TX';
   const simpleReady=state.connected&&state.txUnlocked&&!state.simpleBusy&&!state.dumping;
-  ['simpleAmber','simpleWhite','simpleBlue','simpleOem','blue25','blue50','blue75','blue100'].forEach(id=>$(id).disabled=!simpleReady);
+  ['simpleAmber','simpleWhite','simpleBlue','simpleOem'].forEach(id=>$(id).disabled=!simpleReady);
   $('simpleScan').disabled=!state.connected||state.simpleBusy||state.capturing||state.dumping;
   if(state.connected&&!state.txUnlocked&&!state.authPending&&!state.simpleBusy)$('simpleStatus').textContent='Conectat. Se așteaptă deblocarea automată TX...';
 }
@@ -530,11 +522,7 @@ $('diagGlobalOem').addEventListener('click',()=>void runHli('GLOBAL OEM',[0x04,0
 for(let n=1;n<=6;n++)$('ch'+n).addEventListener('click',()=>void runHli('CH'+n+' ON',hliChannel(n)));
 $('simpleAmber').addEventListener('click',()=>void simpleSetColor(1,'AMBER'));
 $('simpleWhite').addEventListener('click',()=>void simpleSetColor(2,'WHITE'));
-$('simpleBlue').addEventListener('click',()=>void simpleSetColor(6,'BLUE'));
-$('blue25').addEventListener('click',()=>void simpleBluePwm(25));
-$('blue50').addEventListener('click',()=>void simpleBluePwm(50));
-$('blue75').addEventListener('click',()=>void simpleBluePwm(75));
-$('blue100').addEventListener('click',()=>void simpleBluePwm(100));
+$('simpleBlue').addEventListener('click',()=>void simpleBluePwm(100));
 $('simpleOem').addEventListener('click',()=>void simpleReturnOem());
 $('simpleScan').addEventListener('click',()=>void simpleScan());
 $('simpleAdvanced').addEventListener('click',()=>{
