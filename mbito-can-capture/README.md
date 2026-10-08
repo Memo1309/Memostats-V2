@@ -20,7 +20,11 @@ Datele sunt decodificate din notificările FFF2: `A1` conține timestamp (uint32
 - În timpul capturii nu se transmit cadrele în timp real prin BLE. Transmisia începe numai la DUMP.
 - Când numărul recepționat diferă de A3 `count`, descărcarea a fost incompletă. Chiar dacă acestea coincid, `overwritten > 0` înseamnă că începutul capturii a fost pierdut înainte de descărcare.
 - Captura poate surprinde doar traficul care este vizibil prin OBD. Nu este demonstrat încă faptul că evenimentul Blue Welcome este vizibil pe acea magistrală.
-- Nu transmite cadre CAN în vehicul și nu controlează luminile sau ECU-urile.
+- Captura BLE rămâne compatibilă cu comenzile existente `0x01..0x05`.
+- Panoul **TX CAN / HLI** folosește extensia `0x06` pe FFF1. Firmware-ul trebuie să implementeze această comandă și să aibă coadă TX TWAI activă.
+- Format propus `CMD_TX_CAN (0x06)`: `[06][flags][can_id uint32 LE][dlc][data0..data7]` (15 bytes). `flags bit0=extended`.
+- Răspuns opțional firmware `A4`: `[A4][status][can_id uint32 LE][dlc]...`, unde `status=0` înseamnă TX reușit.
+- Pentru HLI: pornește captura, trimite requestul din panoul TX, apoi STOP + DESCARCĂ; răspunsurile așteptate sunt `0x4AD` (stânga) și `0x4AE` (dreapta).
 - Exportul este generat local. Nu închide aplicația în timp ce se descarcă, nici înainte de export.
 
 ## Publicare pe Vercel
