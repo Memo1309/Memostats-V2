@@ -503,27 +503,41 @@ function extractUds0160(frames){
  throw Error('nu am găsit răspuns 62 01 60 pe RX 0x484');
 }
 async function readSccmSwitchState(label){
+ // Deschidem sesiunea ÎNAINTE de captură, ca dump-ul să conțină doar răspunsul DID.
+ $('simpleStatus').textContent=label+' · deschid SCCM166...';
+ await sendCan(0x622,[0x02,0x10,0x03,0,0,0,0,0],'SCCM166 · SESSION 10 03');
+ await sleep(110);
+
  resetSession();
- $('simpleStatus').textContent=label+' · citesc SCCM166...';
  await command(0x01);
  state.startedAt=new Date().toISOString();state.startedPerf=performance.now();state.capturing=true;
- await sleep(35);
- await sendCan(0x622,[0x02,0x10,0x03,0,0,0,0,0],'SCCM166 · SESSION 10 03');
- await sleep(90);
+ await sleep(8);
+
+ $('simpleStatus').textContent=label+' · citesc DID 0160...';
  await sendCan(0x622,[0x03,0x22,0x01,0x60,0,0,0,0],'SCCM166 · READ 0160');
- // Dacă răspunsul e ISO-TP multi-frame, SCCM primește Flow Control. Dacă e single-frame, îl ignoră.
- await sleep(18);
+
+ // Dacă răspunsul începe multi-frame, ECU așteaptă FC. Îl trimitem foarte repede.
+ await sleep(10);
  await sendCan(0x622,[0x30,0x00,0x00,0,0,0,0,0],'SCCM166 · FLOW CONTROL');
- await sleep(220);
+
+ // 55 ms sunt suficiente pentru CF-urile SCCM, dar țin captura sub ~40 cadre pe CAN.
+ await sleep(55);
  await command(0x02);
  state.capturing=false;state.stoppedAt=performance.now();
- await sleep(90);
+
+ await sleep(55);
  state.frames=[];state.expected=null;state.endReceived=false;state.dumpOverwritten=null;state.downloadNotified=0;state.sequenceGaps=0;state.dumping=true;update();
  await command(0x03);
+
  const started=performance.now();
- while(state.dumping&&performance.now()-started<8000)await sleep(100);
- if(state.dumping){state.dumping=false;throw Error('transferul BLE s-a blocat la DUMP');}
+ while(state.dumping&&performance.now()-started<6000)await sleep(60);
+ if(state.dumping){
+   state.dumping=false;
+   throw Error('DUMP BLE nu a terminat nici captura scurtă');
+ }
+
  const frames=state.frames.map(f=>({id:f.id,dlc:f.dlc,data:[...f.data],timestampMs:f.timestampMs}));
+ log(label+' short capture frames='+frames.length);
  const uds=extractUds0160(frames);
  log(label+' 0160 = '+bytesHex(uds.data));
  return uds;
